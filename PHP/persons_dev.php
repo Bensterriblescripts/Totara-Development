@@ -448,6 +448,8 @@ class persons extends handler {
 
 
         /*
+        *   Profile fields sync
+        *7
         *   Update/Create user_info_data record for user - Located on the website in a user's profile page under 'other fields'
         *   
         *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
@@ -559,7 +561,7 @@ class persons extends handler {
         }
 
         /*
-        *   End
+        *   Profile field sync end
         */
 
         // The user exists in moodle so lets look for any changes and update where necessary.
