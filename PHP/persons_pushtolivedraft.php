@@ -69,7 +69,7 @@ class persons extends handler {
         );
         
         // Construct this object.
-        parent::__construct($persons, $requiredlibraries, $requiredfields);
+        parent::__construct($persons, $requiredlibraries, $requiredfields);        
     }
 
     /**
@@ -113,11 +113,6 @@ class persons extends handler {
 
             // Force OIDC
             $person->auth = 'oidc';
-            
-            //Determine whether a supervisor or learner and give the institution field the supervisor/self id
-            if (empty($person->trainingsupervisorid)) {
-                $person->trainingsupervisorid = $person->id;
-            }
 
             // The conditions for users existing by idnumber, username and email.
             $conditionsidnumberusernameandemail = array(
@@ -175,7 +170,7 @@ class persons extends handler {
                 // Prepare a message for the log.
                 $message = $this->get_string(
                     'process',
-                    "A user exists by idnumber {$person->id}, username {$person->username} and email {$person->email}.".
+                    "Updating user with the id {$person->id}, username {$person->username} and email {$person->email}.".
                     "Updating their details."
                 );
 
@@ -191,7 +186,7 @@ class persons extends handler {
 
                 // Prepare a message for the log.
                 $message = $this->get_string(
-                    'process', "A user exists by username {$person->username} and email {$person->email}. Updating their details."
+                    'process', "Updating user with the id, {$person->username} and email {$person->email}. Updating their details."
                 );
 
                 $existinguser = true;
@@ -205,7 +200,7 @@ class persons extends handler {
                 // If the user exists just by idnumber then they could be missing some stuff but I highly doubt it.
 
                 // Prepare a message for the log
-                $message = $this->get_string('process', "A user exists by idnumber {$person->id}. Updating their details.");
+                $message = $this->get_string('process', "Updating user with the idnumber {$person->id}");
 
                 // Output the message to the log.
                 mtrace($message);
@@ -224,40 +219,6 @@ class persons extends handler {
             }
 
             $existinguser = false;
-
-            if (!$existinguser) {
-                $existingperson = core_user::get_user_by_username($person->username);
-                $record = new stdClass();
-                $record->username = $person->userprincipalname;
-                $record->userid = $existingperson->id;
-				
-                // Update the username.
-                $userrequiresupdating = false;
-                $user = new stdClass();
-                $user->id = $existingperson->id;
-                if ($existingperson->username !== $person->userprincipalname) {
-                    $user->username = $person->userprincipalname;
-                    $userrequiresupdating = true;
-                }
-                if ($existingperson->email !== $person->email) {
-                    $user->email = $person->email;
-                    $userrequiresupdating = true;
-                }
-                if ($userrequiresupdating) {
-                    user_update_user($user, false, true);
-                }
-            }
-
-            //
-            $moodleuserinfodata = $DB->get_record('user_info_data', array('userid' => $record->userid));
-            $moodleuserinfofields = array(
-                'id'                => $moodleuserinfodata->id,
-                'userid'            => $moodleuserinfodata->userid,
-                'fieldid'           == '6', 
-                'data'              => $person->totaraassessorgroup
-                
-            );
-            $DB->update_record('user_info_data', $moodleuserinfofields);
         }
 
         // Finished processing all users from ITOMIC webservice.
@@ -490,9 +451,30 @@ class persons extends handler {
         // Has the username been updated? We initially think that it hasn't.
         $usernamehaschanged = false;
 
+        //Change auth to string
         $person->auth = core_text::strtolower($person->auth);
 
-        // Map the moodle user fields to the webservice objects fields.
+        //Grab moodle userid for use in user_info_data
+        $mdluser = $DB->get_record('user', ['idnumber' => $person->id]);
+
+        //Create empty 'changes' booleans for later
+        $assessorgroupchanges = false;
+        $newassessorgrouprecord = false;
+
+        //Determine assessor field changes
+        if ($DB->record_exists('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']) && !empty($person->totaraassessorgroup)) {
+            $assessorgroupcurrent = $DB->get_record('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']);
+            if ($person->totaraassessorgroup != $assessorgroupcurrent->data) {
+                $assessorgroupchanges = true;
+            }
+            $haschanges = true;
+        }
+        else if (!$DB->record_exists('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']) && !empty($person->totaraassessorgroup)){
+            $newassessorgrouprecord = true;
+            $haschanges = true;
+        }
+
+        //Map the fields to the webservice response
         $fieldmappings = array(
             'username'      => 'username',
             'firstname'     => 'firstname',
@@ -504,8 +486,7 @@ class persons extends handler {
             'phone1'        => 'mobile',
             'phone2'        => 'landline',
             'suspended'     => 'status',
-            'auth'          => 'auth',
-            'institution'   => 'trainingsupervisorid'
+            'auth'          => 'auth'
         );
 
         // Iterate over each of the fields that we need to update and check for any changes.
@@ -581,6 +562,30 @@ class persons extends handler {
             }
         }
 
+        // Get moodle userid from the user table
+        $mdluser = $DB->get_record('user', ['idnumber' => $person->id]);
+
+        //Update assessor group
+        if ($assessorgroupchanges) {
+            $userdata = $DB->get_record('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']);
+            $userdata->data = $person->totaraassessorgroup;
+            $DB->update_record('user_info_data', $userdata);
+
+            echo 'Assessor group updated to: ' . $person->totaraassessorgroup;
+        }
+        //Create new assessor group record
+        if ($newassessorgrouprecord){
+            $infodatamappings = array(
+                'userid'            => $mdluser->id,
+                'fieldid'           => '6',
+                'data'              => $person->totaraassessorgroup,
+                'dataformat'        => '0'
+            );
+            $DB->insert_record('user_info_data', $infodatamappings);
+
+            echo 'Assessor group record created and updated to: ' . $person->totaraassessorgroup;
+        };
+
         // Update local mapping.
         $this->map_object('user', $moodleuser->id, $person->id, false, true);
 
@@ -626,7 +631,6 @@ class persons extends handler {
         $itomicperson->timemodified = 0;
         $itomicperson->phone1       = '';
         $itomicperson->phone2       = '';
-        $itomicperson->institution  = '';
 
 
         //Set the authentication to the value provided by CRM - SHOULD ONLY BE OIDC
@@ -652,11 +656,6 @@ class persons extends handler {
         // If the webservice response contains a value for landline then we will update the value for our prepared user object.
         if ($person->landline) {
             $itomicperson->phone2 = $person->landline;
-        }
-
-        // If the webservice response contains a value for institution (supervisor) then we will update the value for our prepared user object.
-        if ($person->institution) {
-            $itomicperson->institution = $person->trainingsupervisorid;
         }
 
         if (isset($person->status) && ($person->status == self::USER_NOT_SUSPENDED || $person->status == self::USER_SUSPENDED)) {
