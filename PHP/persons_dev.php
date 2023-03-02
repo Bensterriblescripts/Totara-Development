@@ -481,7 +481,7 @@ class persons extends handler {
         else if (!$hasassessorfieldrecord) {
 
             // Create the array we will use as a new table record with default values set - except user id
-            $asessorgroupmappings = array(
+            $assessorgroupmappings = array(
                 'userid'        => $moodleuser->id,
                 'fieldid'       => '6',
                 'data'          => 'Not assigned',
@@ -491,7 +491,7 @@ class persons extends handler {
 
             //If the endpoint value isn't empty make the new record
             if (!empty($person->totaraassessorgroup)) {
-                $assessorgroupmappings->data = $person->totaraassessorgroup ;
+                $assessorgroupmappings->data = $person->totaraassessorgroup;
                 $DB->insert_record('user_info_data', $assessorgroupmappings);
 
                 echo 'User assessor group record and set to ' . $person->totaraassessorgroup;
@@ -503,7 +503,7 @@ class persons extends handler {
             $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
 
             //Update the field if the webservice contains a value and the id does not match the one in the user's field
-            if ($usersupervisor->data != $person->$trainingsupervisorid && !empty($person->$trainingsupervisorid)) {
+            if ($usersupervisor->data != $person->trainingsupervisorid && !empty($person->trainingsupervisorid)) {
 
                 $usersupervisor->data = $person->trainingsupervisorid;
                 $DB->update_record('user_info_data', $usersupervisor);
@@ -513,13 +513,13 @@ class persons extends handler {
                     $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                     echo 'Supervisor changed to ' . $supervisor->firstname . ' ' . $supervisor->lastname;
                 }
-                else (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
+                else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
                     echo 'Supervisor with the id ' . $person->trainingsupervisorid . ' does not exist in the LMS but has been added to the user.';
                 }
             }
 
             //Set the supervisor id as user's own id if webservice contains no id
-            else if ($usersupervisor->data != $person->$trainingsupervisorid && empty($person->$trainingsupervisorid)) {
+            else if ($usersupervisor->data != $person->trainingsupervisorid && empty($person->trainingsupervisorid)) {
 
                 $usersupervisor->data = $moodleuser->idnumber;
 
