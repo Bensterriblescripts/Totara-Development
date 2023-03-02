@@ -1,0 +1,3 @@
+<div style="padding:0.5em; text-align:center; color:#FFFFFF; background:#880808;">
+MITO is undergoing maintenance work on the eLearning system from | 10pm Thursday 20 October until 5pm Friday 21 October | the eLearning system, courses, and course materials will not be accessible during this time. Apologies for any inconvenience
+</div>

@@ -1,0 +1,1 @@
+document.write('<p>Click the link below to access the resources for your programme.</p><p><a href="javascript:void(0);" onclick = "parent.location= \'https://elearning.mito.org.nz/login/index.php?auth=oauth2&wantsurl=\' + courseid"><strong>Programme resources</strong></a>.</p>')
