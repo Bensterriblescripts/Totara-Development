@@ -413,7 +413,6 @@ class persons extends handler {
      */
     private function update_person(stdClass $person, $conditions = array()) {
         global $DB;
-        global $persons;
 
         // Check the conditions array. This should have something i.e. key = field and value = the value to find.
         if (empty($conditions)) {
