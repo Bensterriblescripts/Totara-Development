@@ -463,6 +463,7 @@ class persons extends handler {
         //Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
         
+        //--TODO Enclose all mitoid field code in if statement for invlaid/non-existant JSON values. Prevents DB corruption and can be used to notify elearning@mito.org.nz of sync errors.
         //Is there already something there for this user?
         $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
 
@@ -476,7 +477,7 @@ class persons extends handler {
                 $DB->update_record('user_info_data', $mitoidfield);
 
                 $message = $this->get_string(
-                    "process",
+                    "details",
                     "MITO ID set to {$mitoid}"
                 );
 
@@ -502,7 +503,7 @@ class persons extends handler {
                 $DB->insert_record('user_info_data', $mitoidmappings);
 
                 $message = $this->get_string(
-                    "process",
+                    "details",
                     "MITO ID set to {$mitoid}"
                 );
 
@@ -523,15 +524,29 @@ class persons extends handler {
             // Has the field changed? If so, update.
             if ($userassessorgroup->data != $person->totaraassessorgroup) {
 
-                $userassessorgroup->data = $person->totaraassessorgroup;
-                $DB->update_record('user_info_data', $userassessorgroup);
+                if (!empty($person->totaraassessorgroup)) {
 
-                $message = $this->get_string(
-                    "process",
-                    "Assessor group changed to {$person->totaraassessorgroup}"
-                );
+                    $userassessorgroup->data = $person->totaraassessorgroup;
+                    $DB->update_record('user_info_data', $userassessorgroup);
 
-                mtrace($message);
+                    $message = $this->get_string(
+                        "details",
+                        "Assessor group changed to: {$person->totaraassessorgroup}"
+                    );
+                }
+
+                //Avoid mapping NULL or empty strings - Only for if the field already exists
+                else if (empty($person->totaraassessorgroup)) {
+
+                    $userassessorgroup->data = 'Not assigned';
+
+                    $message = $this->get_string(
+                        "details",
+                        "The previous assessor group has been removed from this user and has now been set to: Not Assigned"
+                    );
+
+                    mtrace($message);
+                }
             }
         }
         //Assessor Group - Create
@@ -546,14 +561,14 @@ class persons extends handler {
 
             );
 
-            //If the endpoint value isn't empty make the new record
+            //If the endpoint value isn't empty. If the record doesn't exist the LMS will generate a default 'not assigned' value without adding another row to the table.
             if (!empty($person->totaraassessorgroup)) {
                 $assessorgroupmappings->data = $person->totaraassessorgroup;
                 $DB->insert_record('user_info_data', $assessorgroupmappings);
 
                 $message = $this->get_string(
-                    "process",
-                    "Assessor created and set  {$person->totaraassessorgroup}"
+                    "details",
+                    "Assessor group created and set to: {$person->totaraassessorgroup}"
                 );
 
                 mtrace($message);
@@ -575,8 +590,8 @@ class persons extends handler {
                     $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                     
                     $message = $this->get_string(
-                    "process",
-                    "Supervisor changed to {$supervisor->firstname} {$supervisor->lastname}"
+                    "details",
+                    "Supervisor changed to: {$supervisor->firstname} {$supervisor->lastname}, CRM ID: {$supervisor->idnumber}"
                     );
     
                     mtrace($message);
@@ -584,7 +599,7 @@ class persons extends handler {
                 else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
 
                     $message = $this->get_string(
-                        "process",
+                        "details",
                         "Supervisor with the id {$person->trainingsupervisorid} doesn't exist in the LMS but has been added to the user."
                     );
     
@@ -599,7 +614,7 @@ class persons extends handler {
                 $DB->update_record('user_info_data', $usersupervisor);
 
                 $message = $this->get_string(
-                    "process",
+                    "details",
                     "No supervisor value on endpoint, used own ID instead."
                 );
 
@@ -628,7 +643,7 @@ class persons extends handler {
                 //Get supervisor's name and output
                 $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                 $message = $this->get_string(
-                    "process",
+                    "details",
                     "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
                 );
 
@@ -644,7 +659,7 @@ class persons extends handler {
                 //Get supervisor's name and output
                 $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                 $message = $this->get_string(
-                    "process",
+                    "details",
                     "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
                 );
 
