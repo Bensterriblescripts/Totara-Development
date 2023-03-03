@@ -449,15 +449,67 @@ class persons extends handler {
 
         /*
         *   Profile fields sync
-        *7
+        *
         *   Update/Create user_info_data record for user - Located on the website in a user's profile page under 'other fields'
         *   
         *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
         *   totaraassessorgroup     - fieldid 6 - assessor group in the 'portal' area of a contact record in CRM
+        *   mitoid - TEMP           - fieldid 10 - username without the @ portion
         *
         *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
         *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
         */
+
+        //Manipulate username into MITO ID - TODO Needs to be an endpoint object
+        $mitoid = substr($person->username, 0, strpos($person->username, '@'));
+        
+        //Is there already something there for this user?
+        $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
+
+        //If there is, determine whether it needs changing
+        if ($mitoidfieldexists) {
+            $mitoidfield = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '10']);
+
+            //If it doesn't match, update the record
+            if ($mitoidfield->data != $mitoid) {
+                $mitoidfield->data = $mitoid;
+                $DB->update_record('user_info_data', $mitoidfield);
+
+                $message = $this->get_string(
+                    "process",
+                    "MITO ID set to {$mitoid}"
+                );
+
+                mtrace($message);
+            }
+        }
+
+        //If it doesn't exist, create it
+        else if (!$mitoidfieldexists) {
+
+            // Create the array we will use as a new table record
+            $mitoidmappings = array(
+                'userid'        => $moodleuser->id,
+                'fieldid'       => '10',
+                'data'          => 'Not assigned',
+                'dataformat'    => '0'
+            );
+
+            //If the endpoint value isn't empty make the new record
+            if (!empty($mitoid)) {
+                
+                $mitoidmappings->data = $mitoid;
+                $DB->insert_record('user_info_data', $mitoidmappings);
+
+                $message = $this->get_string(
+                    "process",
+                    "MITO ID set to {$mitoid}"
+                );
+
+                mtrace($message);
+            }
+        }
+
 
         //Do they have a record for each field?
         $hasassessorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
@@ -474,7 +526,12 @@ class persons extends handler {
                 $userassessorgroup->data = $person->totaraassessorgroup;
                 $DB->update_record('user_info_data', $userassessorgroup);
 
-                echo 'User assessor group field changed to ' . $person->totaraassessorgroup . ' ';
+                $message = $this->get_string(
+                    "process",
+                    "Assessor group changed to {$person->totaraassessorgroup}"
+                );
+
+                mtrace($message);
             }
         }
         //Assessor Group - Create
@@ -494,7 +551,12 @@ class persons extends handler {
                 $assessorgroupmappings->data = $person->totaraassessorgroup;
                 $DB->insert_record('user_info_data', $assessorgroupmappings);
 
-                echo 'User assessor group record and set to ' . $person->totaraassessorgroup .  ' ';
+                $message = $this->get_string(
+                    "process",
+                    "Assessor created and set  {$person->totaraassessorgroup}"
+                );
+
+                mtrace($message);
             }
         }
 
@@ -511,10 +573,22 @@ class persons extends handler {
                 //Let someone know if supervisor doesn't exist in the LMS
                 if ($DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
                     $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
-                    echo 'Supervisor changed to ' . $supervisor->firstname . ' ' . $supervisor->lastname;
+                    
+                    $message = $this->get_string(
+                    "process",
+                    "Supervisor changed to {$supervisor->firstname} {$supervisor->lastname}"
+                    );
+    
+                    mtrace($message);
                 }
                 else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
-                    echo 'Supervisor with the id ' . $person->trainingsupervisorid . ' does not exist in the LMS but has been added to the user.';
+
+                    $message = $this->get_string(
+                        "process",
+                        "Supervisor with the id {$person->trainingsupervisorid} doesn't exist in the LMS but has been added to the user."
+                    );
+    
+                    mtrace($message);
                 }
             }
 
@@ -522,10 +596,14 @@ class persons extends handler {
             else if ($usersupervisor->data != $person->trainingsupervisorid && empty($person->trainingsupervisorid)) {
 
                 $usersupervisor->data = $moodleuser->idnumber;
-
                 $DB->update_record('user_info_data', $usersupervisor);
-                echo 'No supervisor value provided, used users own ID number to enter for the field';
 
+                $message = $this->get_string(
+                    "process",
+                    "No supervisor value on endpoint, used own ID instead."
+                );
+
+                mtrace($message);
             }
 
         }
@@ -545,10 +623,16 @@ class persons extends handler {
             if (!empty($person->trainingsupervisorid)) {
 
                 $supervisormappings->data = $person->trainingsupervisorid;
-
                 $DB->insert_record('user_info_data', $supervisormappings);
-                echo 'Supervisor with id ' . $person->trainingsupervisorid . ' assigned to learner';
 
+                //Get supervisor's name and output
+                $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
+                $message = $this->get_string(
+                    "process",
+                    "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
+                );
+
+                mtrace($message);
             }
             //Otherwise, set the supervisor id as user's own id
             else if (empty($person->trainingsupervisorid)) {
@@ -556,7 +640,15 @@ class persons extends handler {
                 $supervisormappings->data = $moodleuser->idnumber;
 
                 $DB->insert_record('user_info_data', $supervisormappings);
-                echo 'Field created, but no supervisor value provided, used users own ID number for the field';
+
+                //Get supervisor's name and output
+                $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
+                $message = $this->get_string(
+                    "process",
+                    "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
+                );
+
+                mtrace($message);
             }
         }
 
