@@ -181,6 +181,8 @@ class persons extends handler {
 
                 // Actual perform the update.
                 $this->update_person($person, $conditionsidnumber);
+                $this->update_profile_fields($person, $conditionsidnumber);
+
             } else if ($userexistsbyusernameandemail) {
                 // If the user exists by username and email then we need to update them. They should have an idnumber.
 
@@ -196,6 +198,8 @@ class persons extends handler {
 
                 // Actual perform the update.
                 $this->update_person($person, $conditionsusernameandemail);
+                $this->update_profile_fields($person, $conditionsidnumberusernameandemail);
+
             } else if ($userexistsbyidnumber) {
                 // If the user exists just by idnumber then they could be missing some stuff but I highly doubt it.
 
@@ -209,6 +213,8 @@ class persons extends handler {
 
                 // Actual perform the update.
                 $this->update_person($person, $conditionsidnumber);
+                $this->update_profile_fields($person, $conditionsidnumber);
+
             } else {
                 // The user doesn't exist. Still look for users that exist with the same email.
                 $this->create_person($person);
@@ -441,24 +447,171 @@ class persons extends handler {
 
             // Output the error message.
             mtrace($errormessage);
-
-            // Todo: This needs to be logged somewhere and someone alerted perhaps?
             return false;
         }
 
 
-        /*
-        *   Profile fields sync
-        *
-        *   Update/Create user_info_data record for user - Located on the website in a user's profile page under 'other fields'
-        *   
-        *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
-        *   totaraassessorgroup     - fieldid 6 - assessor group in the 'portal' area of a contact record in CRM
-        *   mitoid - TEMP           - fieldid 10 - username without the @ portion
-        *
-        *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
-        *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
-        */
+        // The user exists in moodle so lets look for any changes and update where necessary.
+        $haschanges = false;
+
+        // Has the username been updated? We initially think that it hasn't.
+        $usernamehaschanged = false;
+
+        //Change auth to string
+        $person->auth = core_text::strtolower($person->auth);
+
+        //Map the fields to the webservice response
+        $fieldmappings = array(
+            'username'      => 'username',
+            'firstname'     => 'firstname',
+            'lastname'      => 'lastname',
+            'idnumber'      => 'id',
+            'department'    => 'organisation',
+            'timemodified'  => 'modified',
+            'email'         => 'email',
+            'phone1'        => 'mobile',
+            'phone2'        => 'landline',
+            'suspended'     => 'status',
+            'auth'          => 'auth'
+        );
+
+        // Iterate over each of the fields that we need to update and check for any changes.
+        foreach ($fieldmappings as $moodlefield => $itomicfield) {
+            // Update the moodle user data if what is stored doesn't match the webservices data.
+            if (!($person->$itomicfield == $moodleuser->$moodlefield)) {
+
+                // We don't worry about time modified. This is different for ITOMIC.
+                if ($moodlefield == 'timemodified') {
+                    continue;
+                }
+
+                // Update the local_mitowebservices_user mapping because of idnumber change.
+                if ($moodlefield == 'idnumber') {
+                    $existingrecord = $DB->get_record('local_mitowebservices_user', ['sourcedid' => $moodleuser->idnumber]);
+
+                    if ($existingrecord) {
+                        $existingrecord->sourcedid = $person->id;
+
+                        $DB->update_record('local_mitowebservices_user', $existingrecord);
+                    }
+                }
+                
+                // If there has been any changes with the username then we will need to update the openid_urls table.
+                if ($moodlefield == 'username') {
+                    $usernamehaschanged = true;
+                }
+                
+                // The field to update is not the timemodified field.
+                $moodleuser->$moodlefield = $person->$itomicfield;
+
+                // Tell our function that the user has had some changes so that we can update the user in moodle.
+                $haschanges = true;
+            }
+        }
+
+        // If there wasn't any changes then we can just finish here.
+        if (!$haschanges) {
+            return false;
+        }
+
+        // Todo: May need to do way more error checking here, but what?
+        if (!$this->fields_below_max_length('user', $moodleuser)) {
+            return false;
+        }
+
+        // Use the user lib to update our user.
+        user_update_user($moodleuser, false);
+
+        if (core_text::strtolower($person->auth) === 'openid') {
+            // When the username has changed we need to update the openid_urls table. Unfortunately there isn't a function for this
+            // (I may not have looked properly or at all :joy:) so lets just be cool and do it manually :).
+            if ($usernamehaschanged) {
+                // Get the existing data. Update the openid_url only if the record for that user exists. It should though.
+                if ($openidurl = $DB->get_record('openid_urls', array('userid' => $moodleuser->id))) {
+                    // Get the openid_url_userfield. This will be used to construct the updated openid_url for this user.
+                    $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
+
+                    // Change the existing records url value to reflect the username change.
+                    $openidurl->url = $this->openidurl . $moodleuser->$openidurluserfield;
+
+                    // Update the openid_urls table with the updated openid_url.
+                    $DB->update_record('openid_urls', $openidurl);
+
+                    // Output a message to notify of openid_url change.
+                    // Todo: This would be really cool if it was an event trigger? Or not. But for now I am not that cool :(.
+                    $outputmessage = $this->get_string(
+                        'update_person', "Updated openid_url for ITOMIC user with id {$person->id} because of username change"
+                    );
+
+                    mtrace($outputmessage);
+                }
+            }
+        }
+
+        // Update local mapping.
+        $this->map_object('user', $moodleuser->id, $person->id, false, true);
+
+        // Check for user suspension and suspend if necessary.
+        if (isset($moodleuser->suspended) && $moodleuser->suspended) {
+            manager::kill_user_sessions($moodleuser->id);
+
+            // Trigger a user suspended event.
+            user_suspended::create_from_user($moodleuser)->trigger();
+        }
+
+        // Tell the calling function that we updated the user.
+        return true;
+    }
+
+    /**
+    *   Profile fields sync
+    *
+    *   Update or create a user_info_data record for user - Located on the website in a user's profile page under 'other fields'
+    *   
+    *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
+    *   totaraassessorgroup     - fieldid 6 - assessor group in the 'portal' area of a contact record in CRM
+    *   mitoid - TEMP           - fieldid 10 - username without the @ portion
+    *
+    *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
+    *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
+    *
+    * @param   stdClass $person   
+    * @throws  \exception          
+    * @return  bool                
+    *                              
+    */
+
+    private function update_profile_fields(stdClass $person, $conditions = array()) {
+
+        global $DB;
+
+        // Check the conditions array. This should have something i.e. key = field and value = the value to find.
+        if (empty($conditions)) {
+
+            // Lets notifiy the output that there was an issue. This shouldn't ever happen.
+            mtrace($this->get_string('update_person', "Conditions can not be empty.", 'exception'));
+            return false;
+
+        }
+
+        // Ensure that we are filtering for only users that are not deleted.
+        if (!isset($conditions['deleted'])) {
+            $conditions['deleted'] = 0;
+        }
+
+        // Find the moodle user for this person.
+        $moodleuser = $DB->get_record('user', $conditions);
+        
+        if (!$moodleuser) {
+            // The person we are trying to update doesn't exist in moodle. This should never happen but we will catch it anyway.
+            $errormessage = $this->get_string(
+                'update_person', "The person with id {$person->id} you are trying to update doesn't exist in moodle."
+            );
+
+            // Output the error message.
+            mtrace($errormessage);
+            return false;
+        }
 
         //Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
@@ -573,7 +726,7 @@ class persons extends handler {
 
                 mtrace($message);
             }
-        }
+        }        
 
         //Supervisor - Update
         if ($hassupervisorfieldrecord) {
@@ -660,126 +813,14 @@ class persons extends handler {
                 $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                 $message = $this->get_string(
                     "details",
-                    "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
+                    "{$supervisor->firstname} {$supervisor->lastname} is a supervisor and has assigned their ID to themselves"
                 );
 
                 mtrace($message);
             }
         }
 
-        /*
-        *   Profile field sync end
-        */
-
-        // The user exists in moodle so lets look for any changes and update where necessary.
-        $haschanges = false;
-
-        // Has the username been updated? We initially think that it hasn't.
-        $usernamehaschanged = false;
-
-        //Change auth to string
-        $person->auth = core_text::strtolower($person->auth);
-
-        //Map the fields to the webservice response
-        $fieldmappings = array(
-            'username'      => 'username',
-            'firstname'     => 'firstname',
-            'lastname'      => 'lastname',
-            'idnumber'      => 'id',
-            'department'    => 'organisation',
-            'timemodified'  => 'modified',
-            'email'         => 'email',
-            'phone1'        => 'mobile',
-            'phone2'        => 'landline',
-            'suspended'     => 'status',
-            'auth'          => 'auth'
-        );
-
-        // Iterate over each of the fields that we need to update and check for any changes.
-        foreach ($fieldmappings as $moodlefield => $itomicfield) {
-            // Update the moodle user data if what is stored doesn't match the webservices data.
-            if (!($person->$itomicfield == $moodleuser->$moodlefield)) {
-
-                // We don't worry about time modified. This is different for ITOMIC.
-                if ($moodlefield == 'timemodified') {
-                    continue;
-                }
-
-                // Update the local_mitowebservices_user mapping because of idnumber change.
-                if ($moodlefield == 'idnumber') {
-                    $existingrecord = $DB->get_record('local_mitowebservices_user', ['sourcedid' => $moodleuser->idnumber]);
-
-                    if ($existingrecord) {
-                        $existingrecord->sourcedid = $person->id;
-
-                        $DB->update_record('local_mitowebservices_user', $existingrecord);
-                    }
-                }
-                
-                // If there has been any changes with the username then we will need to update the openid_urls table.
-                if ($moodlefield == 'username') {
-                    $usernamehaschanged = true;
-                }
-                
-                // The field to update is not the timemodified field.
-                $moodleuser->$moodlefield = $person->$itomicfield;
-
-                // Tell our function that the user has had some changes so that we can update the user in moodle.
-                $haschanges = true;
-            }
-        }
-
-        // If there wasn't any changes then we can just finish here.
-        if (!$haschanges) {
-            return false;
-        }
-
-        // Todo: May need to do way more error checking here, but what?
-        if (!$this->fields_below_max_length('user', $moodleuser)) {
-            return false;
-        }
-
-        // Use the user lib to update our user.
-        user_update_user($moodleuser, false);
-
-        if (core_text::strtolower($person->auth) === 'openid') {
-            // When the username has changed we need to update the openid_urls table. Unfortunately there isn't a function for this
-            // (I may not have looked properly or at all :joy:) so lets just be cool and do it manually :).
-            if ($usernamehaschanged) {
-                // Get the existing data. Update the openid_url only if the record for that user exists. It should though.
-                if ($openidurl = $DB->get_record('openid_urls', array('userid' => $moodleuser->id))) {
-                    // Get the openid_url_userfield. This will be used to construct the updated openid_url for this user.
-                    $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
-
-                    // Change the existing records url value to reflect the username change.
-                    $openidurl->url = $this->openidurl . $moodleuser->$openidurluserfield;
-
-                    // Update the openid_urls table with the updated openid_url.
-                    $DB->update_record('openid_urls', $openidurl);
-
-                    // Output a message to notify of openid_url change.
-                    // Todo: This would be really cool if it was an event trigger? Or not. But for now I am not that cool :(.
-                    $outputmessage = $this->get_string(
-                        'update_person', "Updated openid_url for ITOMIC user with id {$person->id} because of username change"
-                    );
-
-                    mtrace($outputmessage);
-                }
-            }
-        }
-
-        // Update local mapping.
-        $this->map_object('user', $moodleuser->id, $person->id, false, true);
-
-        // Check for user suspension and suspend if necessary.
-        if (isset($moodleuser->suspended) && $moodleuser->suspended) {
-            manager::kill_user_sessions($moodleuser->id);
-
-            // Trigger a user suspended event.
-            user_suspended::create_from_user($moodleuser)->trigger();
-        }
-
-        // Tell the calling function that we updated the user.
+        //Done!
         return true;
     }
 
