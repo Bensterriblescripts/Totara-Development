@@ -67,15 +67,9 @@ class persons extends handler {
         $requiredfields = array(
             'id', 'username', 'firstname', 'lastname', 'email', 'mobile', 'landline', 'organisation', 'modified', 'trainingsupervisorid', 'totaraassessorgroup'
         );
-
-        /*
-        if ($issuerid = get_config('local_mitowebservices', 'oauth2issuerid')) {
-            $this->oauth2issuer = new issuer($issuerid);
-        }
-        */
         
         // Construct this object.
-        parent::__construct($persons, $requiredlibraries, $requiredfields);
+        parent::__construct($persons, $requiredlibraries, $requiredfields);        
     }
 
     /**
@@ -119,11 +113,6 @@ class persons extends handler {
 
             // Force OIDC
             $person->auth = 'oidc';
-            
-            //Determine whether a supervisor or learner and give the institution field the supervisor/self id
-            if (empty($person->trainingsupervisorid)) {
-                $person->trainingsupervisorid = $person->id;
-            }
 
             // The conditions for users existing by idnumber, username and email.
             $conditionsidnumberusernameandemail = array(
@@ -181,7 +170,7 @@ class persons extends handler {
                 // Prepare a message for the log.
                 $message = $this->get_string(
                     'process',
-                    "A user exists by idnumber {$person->id}, username {$person->username} and email {$person->email}.".
+                    "Updating user with the id {$person->id}, username {$person->username} and email {$person->email}.".
                     "Updating their details."
                 );
 
@@ -197,7 +186,7 @@ class persons extends handler {
 
                 // Prepare a message for the log.
                 $message = $this->get_string(
-                    'process', "A user exists by username {$person->username} and email {$person->email}. Updating their details."
+                    'process', "Updating user with the id, {$person->username} and email {$person->email}. Updating their details."
                 );
 
                 $existinguser = true;
@@ -211,7 +200,7 @@ class persons extends handler {
                 // If the user exists just by idnumber then they could be missing some stuff but I highly doubt it.
 
                 // Prepare a message for the log
-                $message = $this->get_string('process', "A user exists by idnumber {$person->id}. Updating their details.");
+                $message = $this->get_string('process', "Updating user with the idnumber {$person->id}");
 
                 // Output the message to the log.
                 mtrace($message);
@@ -225,42 +214,11 @@ class persons extends handler {
                 $this->create_person($person);
             }
 
-            /*
-            if (!$this->oauth2issuer) {
-                continue;
-            }
-            */
-
             if (!$hasupn) {
                 continue;
             }
 
             $existinguser = false;
-            /* api::match_username_to_user($person->username, $this->oauth2issuer);*/
-
-            if (!$existinguser) {
-                $existingperson = core_user::get_user_by_username($person->username);
-                $record = new stdClass();
-                /*$record->issuerid = $this->oauth2issuer->get('id');*/
-                $record->username = $person->userprincipalname;
-                $record->userid = $existingperson->id;
-				
-                // Update the username.
-                $userrequiresupdating = false;
-                $user = new stdClass();
-                $user->id = $existingperson->id;
-                if ($existingperson->username !== $person->userprincipalname) {
-                    $user->username = $person->userprincipalname;
-                    $userrequiresupdating = true;
-                }
-                if ($existingperson->email !== $person->email) {
-                    $user->email = $person->email;
-                    $userrequiresupdating = true;
-                }
-                if ($userrequiresupdating) {
-                    user_update_user($user, false, true);
-                }
-            }
         }
 
         // Finished processing all users from ITOMIC webservice.
@@ -454,6 +412,7 @@ class persons extends handler {
      *                              the caller is false :joy:.
      */
     private function update_person(stdClass $person, $conditions = array()) {
+
         global $DB;
 
         // Check the conditions array. This should have something i.e. key = field and value = the value to find.
@@ -487,15 +446,134 @@ class persons extends handler {
             return false;
         }
 
+
+        /*
+        *   Profile fields sync
+        *7
+        *   Update/Create user_info_data record for user - Located on the website in a user's profile page under 'other fields'
+        *   
+        *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
+        *   totaraassessorgroup     - fieldid 6 - assessor group in the 'portal' area of a contact record in CRM
+        *
+        *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
+        *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
+        */
+
+        //Do they have a record for each field?
+        $hasassessorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+        $hassupervisorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+        
+        //Assessor Group - Update
+        if ($hasassessorfieldrecord) {
+
+            $userassessorgroup = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+
+            // Has the field changed? If so, update.
+            if ($userassessorgroup->data != $person->totaraassessorgroup) {
+
+                $userassessorgroup->data = $person->totaraassessorgroup;
+                $DB->update_record('user_info_data', $userassessorgroup);
+
+                echo 'User assessor group field changed to ' . $person->totaraassessorgroup . ' ';
+            }
+        }
+        //Assessor Group - Create
+        else if (!$hasassessorfieldrecord) {
+
+            // Create the array we will use as a new table record with default values set - except user id
+            $assessorgroupmappings = array(
+                'userid'        => $moodleuser->id,
+                'fieldid'       => '6',
+                'data'          => 'Not assigned',
+                'dataformat'    => '0'
+
+            );
+
+            //If the endpoint value isn't empty make the new record
+            if (!empty($person->totaraassessorgroup)) {
+                $assessorgroupmappings->data = $person->totaraassessorgroup;
+                $DB->insert_record('user_info_data', $assessorgroupmappings);
+
+                echo 'User assessor group record and set to ' . $person->totaraassessorgroup .  ' ';
+            }
+        }
+
+        //Supervisor - Update
+        if ($hassupervisorfieldrecord) {
+            $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+
+            //Update the field if the webservice contains a value and the id does not match the one in the user's field
+            if ($usersupervisor->data != $person->trainingsupervisorid && !empty($person->trainingsupervisorid)) {
+
+                $usersupervisor->data = $person->trainingsupervisorid;
+                $DB->update_record('user_info_data', $usersupervisor);
+
+                //Let someone know if supervisor doesn't exist in the LMS
+                if ($DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
+                    $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
+                    echo 'Supervisor changed to ' . $supervisor->firstname . ' ' . $supervisor->lastname;
+                }
+                else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
+                    echo 'Supervisor with the id ' . $person->trainingsupervisorid . ' does not exist in the LMS but has been added to the user.';
+                }
+            }
+
+            //Set the supervisor id as user's own id if webservice contains no id
+            else if ($usersupervisor->data != $person->trainingsupervisorid && empty($person->trainingsupervisorid)) {
+
+                $usersupervisor->data = $moodleuser->idnumber;
+
+                $DB->update_record('user_info_data', $usersupervisor);
+                echo 'No supervisor value provided, used users own ID number to enter for the field';
+
+            }
+
+        }
+
+        //Supervisor - Create
+        else if (!$hassupervisorfieldrecord) {
+
+            // Create the array we will use as a new table record with default values set - except user id
+            $supervisormappings = array(
+                'userid'        => $moodleuser->id,
+                'fieldid'       => '9',
+                'data'          => 'None',
+                'dataformat'    => '0'
+            );
+
+            //If the endpoint value isn't empty make the new record
+            if (!empty($person->trainingsupervisorid)) {
+
+                $supervisormappings->data = $person->trainingsupervisorid;
+
+                $DB->insert_record('user_info_data', $supervisormappings);
+                echo 'Supervisor with id ' . $person->trainingsupervisorid . ' assigned to learner';
+
+            }
+            //Otherwise, set the supervisor id as user's own id
+            else if (empty($person->trainingsupervisorid)) {
+
+                $supervisormappings->data = $moodleuser->idnumber;
+
+                $DB->insert_record('user_info_data', $supervisormappings);
+                echo 'Field created, but no supervisor value provided, used users own ID number for the field';
+            }
+        }
+
+        /*
+        *   Profile field sync end
+        */
+
         // The user exists in moodle so lets look for any changes and update where necessary.
         $haschanges = false;
 
         // Has the username been updated? We initially think that it hasn't.
         $usernamehaschanged = false;
 
+        //Change auth to string
         $person->auth = core_text::strtolower($person->auth);
 
-        // Map the moodle user fields to the webservice objects fields.
+        //Map the fields to the webservice response
         $fieldmappings = array(
             'username'      => 'username',
             'firstname'     => 'firstname',
@@ -507,16 +585,8 @@ class persons extends handler {
             'phone1'        => 'mobile',
             'phone2'        => 'landline',
             'suspended'     => 'status',
-            'auth'          => 'auth',
-            'institution'   => 'trainingsupervisorid'
+            'auth'          => 'auth'
         );
-
-        // if ($person->trainingsupervisorid) {
-        //     $fieldmappings = array('institution' => 'trainingsupervisorid');
-        // }
-        // else {
-        //     $fieldmappings = array('institution' => 'id');
-        // }
 
         // Iterate over each of the fields that we need to update and check for any changes.
         foreach ($fieldmappings as $moodlefield => $itomicfield) {
@@ -538,7 +608,7 @@ class persons extends handler {
                         $DB->update_record('local_mitowebservices_user', $existingrecord);
                     }
                 }
-
+                
                 // If there has been any changes with the username then we will need to update the openid_urls table.
                 if ($moodlefield == 'username') {
                     $usernamehaschanged = true;
@@ -636,7 +706,6 @@ class persons extends handler {
         $itomicperson->timemodified = 0;
         $itomicperson->phone1       = '';
         $itomicperson->phone2       = '';
-        $itomicperson->institution  = '';
 
 
         //Set the authentication to the value provided by CRM - SHOULD ONLY BE OIDC
@@ -662,11 +731,6 @@ class persons extends handler {
         // If the webservice response contains a value for landline then we will update the value for our prepared user object.
         if ($person->landline) {
             $itomicperson->phone2 = $person->landline;
-        }
-
-        // If the webservice response contains a value for institution (supervisor) then we will update the value for our prepared user object.
-        if ($person->institution) {
-            $itomicperson->institution = $person->trainingsupervisorid;
         }
 
         if (isset($person->status) && ($person->status == self::USER_NOT_SUSPENDED || $person->status == self::USER_SUSPENDED)) {
