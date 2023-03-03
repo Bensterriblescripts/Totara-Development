@@ -412,6 +412,7 @@ class persons extends handler {
      *                              the caller is false :joy:.
      */
     private function update_person(stdClass $person, $conditions = array()) {
+
         global $DB;
 
         // Check the conditions array. This should have something i.e. key = field and value = the value to find.
@@ -445,6 +446,124 @@ class persons extends handler {
             return false;
         }
 
+
+        /*
+        *   Profile fields sync
+        *7
+        *   Update/Create user_info_data record for user - Located on the website in a user's profile page under 'other fields'
+        *   
+        *   trainingsupervisorid    - fieldid 9 - id for the supervisor that is currently assigned to the record, will be blank if none 
+        *   totaraassessorgroup     - fieldid 6 - assessor group in the 'portal' area of a contact record in CRM
+        *
+        *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
+        *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
+        */
+
+        //Do they have a record for each field?
+        $hasassessorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+        $hassupervisorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+        
+        //Assessor Group - Update
+        if ($hasassessorfieldrecord) {
+
+            $userassessorgroup = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+
+            // Has the field changed? If so, update.
+            if ($userassessorgroup->data != $person->totaraassessorgroup) {
+
+                $userassessorgroup->data = $person->totaraassessorgroup;
+                $DB->update_record('user_info_data', $userassessorgroup);
+
+                echo 'User assessor group field changed to ' . $person->totaraassessorgroup . ' ';
+            }
+        }
+        //Assessor Group - Create
+        else if (!$hasassessorfieldrecord) {
+
+            // Create the array we will use as a new table record with default values set - except user id
+            $assessorgroupmappings = array(
+                'userid'        => $moodleuser->id,
+                'fieldid'       => '6',
+                'data'          => 'Not assigned',
+                'dataformat'    => '0'
+
+            );
+
+            //If the endpoint value isn't empty make the new record
+            if (!empty($person->totaraassessorgroup)) {
+                $assessorgroupmappings->data = $person->totaraassessorgroup;
+                $DB->insert_record('user_info_data', $assessorgroupmappings);
+
+                echo 'User assessor group record and set to ' . $person->totaraassessorgroup .  ' ';
+            }
+        }
+
+        //Supervisor - Update
+        if ($hassupervisorfieldrecord) {
+            $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+
+            //Update the field if the webservice contains a value and the id does not match the one in the user's field
+            if ($usersupervisor->data != $person->trainingsupervisorid && !empty($person->trainingsupervisorid)) {
+
+                $usersupervisor->data = $person->trainingsupervisorid;
+                $DB->update_record('user_info_data', $usersupervisor);
+
+                //Let someone know if supervisor doesn't exist in the LMS
+                if ($DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
+                    $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
+                    echo 'Supervisor changed to ' . $supervisor->firstname . ' ' . $supervisor->lastname;
+                }
+                else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
+                    echo 'Supervisor with the id ' . $person->trainingsupervisorid . ' does not exist in the LMS but has been added to the user.';
+                }
+            }
+
+            //Set the supervisor id as user's own id if webservice contains no id
+            else if ($usersupervisor->data != $person->trainingsupervisorid && empty($person->trainingsupervisorid)) {
+
+                $usersupervisor->data = $moodleuser->idnumber;
+
+                $DB->update_record('user_info_data', $usersupervisor);
+                echo 'No supervisor value provided, used users own ID number to enter for the field';
+
+            }
+
+        }
+
+        //Supervisor - Create
+        else if (!$hassupervisorfieldrecord) {
+
+            // Create the array we will use as a new table record with default values set - except user id
+            $supervisormappings = array(
+                'userid'        => $moodleuser->id,
+                'fieldid'       => '9',
+                'data'          => 'None',
+                'dataformat'    => '0'
+            );
+
+            //If the endpoint value isn't empty make the new record
+            if (!empty($person->trainingsupervisorid)) {
+
+                $supervisormappings->data = $person->trainingsupervisorid;
+
+                $DB->insert_record('user_info_data', $supervisormappings);
+                echo 'Supervisor with id ' . $person->trainingsupervisorid . ' assigned to learner';
+
+            }
+            //Otherwise, set the supervisor id as user's own id
+            else if (empty($person->trainingsupervisorid)) {
+
+                $supervisormappings->data = $moodleuser->idnumber;
+
+                $DB->insert_record('user_info_data', $supervisormappings);
+                echo 'Field created, but no supervisor value provided, used users own ID number for the field';
+            }
+        }
+
+        /*
+        *   Profile field sync end
+        */
+
         // The user exists in moodle so lets look for any changes and update where necessary.
         $haschanges = false;
 
@@ -453,26 +572,6 @@ class persons extends handler {
 
         //Change auth to string
         $person->auth = core_text::strtolower($person->auth);
-
-        //Grab moodle userid for use in user_info_data
-        $mdluser = $DB->get_record('user', ['idnumber' => $person->id]);
-
-        //Create empty 'changes' booleans for later
-        $assessorgroupchanges = false;
-        $newassessorgrouprecord = false;
-
-        //Determine assessor field changes
-        if ($DB->record_exists('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']) && !empty($person->totaraassessorgroup)) {
-            $assessorgroupcurrent = $DB->get_record('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']);
-            if ($person->totaraassessorgroup != $assessorgroupcurrent->data) {
-                $assessorgroupchanges = true;
-            }
-            $haschanges = true;
-        }
-        else if (!$DB->record_exists('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']) && !empty($person->totaraassessorgroup)){
-            $newassessorgrouprecord = true;
-            $haschanges = true;
-        }
 
         //Map the fields to the webservice response
         $fieldmappings = array(
@@ -561,30 +660,6 @@ class persons extends handler {
                 }
             }
         }
-
-        // Get moodle userid from the user table
-        $mdluser = $DB->get_record('user', ['idnumber' => $person->id]);
-
-        //Update assessor group
-        if ($assessorgroupchanges) {
-            $userdata = $DB->get_record('user_info_data', ['userid' => $mdluser->id, 'fieldid' => '6']);
-            $userdata->data = $person->totaraassessorgroup;
-            $DB->update_record('user_info_data', $userdata);
-
-            echo 'Assessor group updated to: ' . $person->totaraassessorgroup;
-        }
-        //Create new assessor group record
-        if ($newassessorgrouprecord){
-            $infodatamappings = array(
-                'userid'            => $mdluser->id,
-                'fieldid'           => '6',
-                'data'              => $person->totaraassessorgroup,
-                'dataformat'        => '0'
-            );
-            $DB->insert_record('user_info_data', $infodatamappings);
-
-            echo 'Assessor group record created and updated to: ' . $person->totaraassessorgroup;
-        };
 
         // Update local mapping.
         $this->map_object('user', $moodleuser->id, $person->id, false, true);
