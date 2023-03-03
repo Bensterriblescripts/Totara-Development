@@ -1,9 +1,0 @@
-App:
-Name: Totara - OpenID Connect Access
-Application ID: 2187c516-91cc-429c-8944-e05b0b98540a
-Object ID: 67ef1bf8-afad-48e0-8567-262e098f2db8
-Tenant ID: 626a0e14-4f82-448f-b16b-ea845eda3dd7
-
-Key:
-value: N2z8Q~GwwztpaPEAJ78dOGBl9yqviCNFKLQ5ga7M
-shhhh: 1c87a476-7a56-45b9-9476-4658eb912a79

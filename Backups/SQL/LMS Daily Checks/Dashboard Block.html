@@ -1,0 +1,54 @@
+<script>
+    $.fn.checkRecords = function(){
+        let tdcount = $(this).parent();
+        let totalrecords = $(tdcount).find("#totalrecords");
+        let totalrecordstext = $(totalrecords).text();
+        let msg = $("<em></em>").html("No records in queue");
+        $(msg).css("color", "gray");
+        if (totalrecordstext.includes("=")){
+                console.log("Records text: " + totalrecordstext);
+            } else {
+                console.log("Nothing to see here" + totalrecordstext);
+                $(this).append(msg);
+            }
+    }
+    $(document).ready(function(){
+     $("#incorrectgoals").load("/blocks/configurable_reports/viewreport.php?id=264 #totalrecords", function(){
+        $(this).checkRecords();
+    });
+     $("#incompleteRPL").load("/blocks/configurable_reports/viewreport.php?id=86 #totalrecords", function(){
+        $(this).checkRecords();
+    });
+     $("#failedcompletions").load("/blocks/configurable_reports/viewreport.php?id=173 #totalrecords", function(){
+        $(this).checkRecords();
+    });
+    $("#overrideerror").load("/blocks/configurable_reports/viewreport.php?id=192 #totalrecords", function(){
+        $(this).checkRecords();
+    });
+    $("#autolockouts2").load("/blocks/configurable_reports/viewreport.php?id=168 #totalrecords", function(){
+        $(this).checkRecords();
+    });
+    });
+    defer
+    </script>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=264">Incorrect goals</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td><div id="incorrectgoals"></div></td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=86">Incomplete RPL</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td><div id="incompleteRPL"></div></td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=173">Failed quiz completions</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td><div id="failedcompletions"></div></td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=192">Overrides with a password (error)</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td><div id="overrideerror"></div></td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=168">Locked auto-marked - 3rd</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td><td><div id="autolockouts2"></div></td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=94">Learner feedback (last 31 days)</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr></tbody></table>
+    
+    <table>
+    <tbody><tr><td><a href="/blocks/configurable_reports/viewreport.php?id=459">Old written assessment version completions</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr></tbody></table>
