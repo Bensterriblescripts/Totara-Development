@@ -615,10 +615,15 @@ class persons extends handler {
 
         //Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
+
+        //Does the user have existing records?
+        $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
+        $assessorgroupfieldexists = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+        $supervisorfieldexists = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
         
         //Create the default MITO ID field mappings
         $mitoidmappings = array(
-            'userid' => $moodleuser->id,
+            'userid'        => $moodleuser->id,
             'fieldid'       => '10',
             'data'          => 'Not assigned',
             'dataformat'    => '0'
@@ -635,13 +640,11 @@ class persons extends handler {
         $supervisormappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '9',
-            'data'          => 'None',
+            'data'          => '',
             'dataformat'    => '0'
         );
 
-        //--TODO Enclose all mitoid field code in if statement for invlaid/non-existant JSON values. Prevents DB corruption and can be used to notify elearning@mito.org.nz of sync errors.
-        //Is there already something there for this user?
-        $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
+        //TODO: Enclose all mitoid field code in if statement for invalid/non-existant JSON values. Prevents potential DB corruption and can be used to notify elearning@mito.org.nz of sync errors.
 
         //If there is, determine whether it needs changing
         if ($mitoidfieldexists) {
@@ -679,13 +682,8 @@ class persons extends handler {
             }
         }
 
-
-        //Do they have a record for each field?
-        $hasassessorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
-        $hassupervisorfieldrecord = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
-        
         //Assessor Group - Update
-        if ($hasassessorfieldrecord) {
+        if ($assessorgroupfieldexists) {
 
             $userassessorgroup = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
 
@@ -718,7 +716,7 @@ class persons extends handler {
             }
         }
         //Assessor Group - Create
-        else if (!$hasassessorfieldrecord) {
+        else if (!$assessorgroupfieldexists) {
 
             //If the endpoint value isn't empty. If the record doesn't exist the LMS will generate a default 'not assigned' value without adding another row to the table.
             if (!empty($person->totaraassessorgroup)) {
@@ -735,7 +733,7 @@ class persons extends handler {
         }        
 
         //Supervisor - Update
-        if ($hassupervisorfieldrecord) {
+        if ($supervisorfieldexists) {
             $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
 
             //Update the field if the webservice contains a value and the id does not match the one in the user's field
@@ -783,7 +781,7 @@ class persons extends handler {
         }
 
         //Supervisor - Create
-        else if (!$hassupervisorfieldrecord) {
+        else if (!$supervisorfieldexists) {
 
             //If the endpoint value isn't empty make the new record
             if (!empty($person->trainingsupervisorid)) {
