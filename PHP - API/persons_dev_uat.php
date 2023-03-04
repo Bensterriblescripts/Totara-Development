@@ -573,7 +573,7 @@ class persons extends handler {
     *   mitoid - TEMP           - fieldid 10 - username without the @ portion
     *
     *   If the user is a supervisor they will assign their own ID to themselves to auto-group them and their learners by ID
-    *   --TODO Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
+    *   Todo: Fix the above, use the agents (array?) of a supervisor JSON push to sync supervisors correctly.
     *
     * @param   stdClass $person   
     * @throws  \exception          
@@ -616,6 +616,29 @@ class persons extends handler {
         //Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
         
+        //Create the default MITO ID field mappings
+        $mitoidmappings = array(
+            'userid' => $moodleuser->id,
+            'fieldid'       => '10',
+            'data'          => 'Not assigned',
+            'dataformat'    => '0'
+        );
+        //Create the default assessor group field mappings
+        $assessorgroupmappings = array(
+            'userid'        => $moodleuser->id,
+            'fieldid'       => '6',
+            'data'          => 'Not assigned',
+            'dataformat'    => '0'
+
+        );
+        //Create the default supervisor field mappings
+        $supervisormappings = array(
+            'userid'        => $moodleuser->id,
+            'fieldid'       => '9',
+            'data'          => 'None',
+            'dataformat'    => '0'
+        );
+
         //--TODO Enclose all mitoid field code in if statement for invlaid/non-existant JSON values. Prevents DB corruption and can be used to notify elearning@mito.org.nz of sync errors.
         //Is there already something there for this user?
         $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
@@ -640,14 +663,6 @@ class persons extends handler {
 
         //If it doesn't exist, create it
         else if (!$mitoidfieldexists) {
-
-            // Create the array we will use as a new table record
-            $mitoidmappings = array(
-                'userid'        => $moodleuser->id,
-                'fieldid'       => '10',
-                'data'          => 'Not assigned',
-                'dataformat'    => '0'
-            );
 
             //If the endpoint value isn't empty make the new record
             if (!empty($mitoid)) {
@@ -704,15 +719,6 @@ class persons extends handler {
         }
         //Assessor Group - Create
         else if (!$hasassessorfieldrecord) {
-
-            // Create the array we will use as a new table record with default values set - except user id
-            $assessorgroupmappings = array(
-                'userid'        => $moodleuser->id,
-                'fieldid'       => '6',
-                'data'          => 'Not assigned',
-                'dataformat'    => '0'
-
-            );
 
             //If the endpoint value isn't empty. If the record doesn't exist the LMS will generate a default 'not assigned' value without adding another row to the table.
             if (!empty($person->totaraassessorgroup)) {
@@ -779,14 +785,6 @@ class persons extends handler {
         //Supervisor - Create
         else if (!$hassupervisorfieldrecord) {
 
-            // Create the array we will use as a new table record with default values set - except user id
-            $supervisormappings = array(
-                'userid'        => $moodleuser->id,
-                'fieldid'       => '9',
-                'data'          => 'None',
-                'dataformat'    => '0'
-            );
-
             //If the endpoint value isn't empty make the new record
             if (!empty($person->trainingsupervisorid)) {
 
@@ -820,7 +818,7 @@ class persons extends handler {
             }
         }
 
-        //Done!
+        //Let our function know we're done.
         return true;
     }
 
