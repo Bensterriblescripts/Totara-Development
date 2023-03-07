@@ -625,7 +625,7 @@ class persons extends handler {
         $mitoidmappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '10',
-            'data'          => 'Not assigned',
+            'data'          => 'Pending Sync',
             'dataformat'    => '0'
         );
         //Create the default assessor group field mappings
@@ -640,7 +640,7 @@ class persons extends handler {
         $supervisormappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '9',
-            'data'          => '',
+            'data'          => 'Not assigned',
             'dataformat'    => '0'
         );
 
@@ -699,6 +699,7 @@ class persons extends handler {
                         "details",
                         "Assessor group changed to: {$person->totaraassessorgroup}"
                     );
+                    mtrace($message);
                 }
 
                 //Avoid mapping NULL or empty strings - Only for if the field already exists
@@ -710,7 +711,6 @@ class persons extends handler {
                         "details",
                         "The previous assessor group has been removed from this user and has now been set to: Not Assigned"
                     );
-
                     mtrace($message);
                 }
             }
@@ -727,7 +727,6 @@ class persons extends handler {
                     "details",
                     "Assessor group created and set to: {$person->totaraassessorgroup}"
                 );
-
                 mtrace($message);
             }
         }        
@@ -737,24 +736,22 @@ class persons extends handler {
             $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
 
             //Update the field if the webservice contains a value and the id does not match the one in the user's field
-            if ($usersupervisor->data != $person->trainingsupervisorid && !empty($person->trainingsupervisorid)) {
+            if (($usersupervisor->data != $person->trainingsupervisorid) && (!empty($person->trainingsupervisorid))) {
 
                 $usersupervisor->data = $person->trainingsupervisorid;
                 $DB->update_record('user_info_data', $usersupervisor);
 
                 //Let someone know if supervisor doesn't exist in the LMS
                 if ($DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
-                    $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                     
                     $message = $this->get_string(
                     "details",
-                    "Supervisor changed to: {$supervisor->firstname} {$supervisor->lastname}, CRM ID: {$supervisor->idnumber}"
+                    "Supervisor changed to the user with the id: {$person->trainingsupervisorid}"
                     );
     
                     mtrace($message);
                 }
                 else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
-
                     $message = $this->get_string(
                         "details",
                         "Supervisor with the id {$person->trainingsupervisorid} doesn't exist in the LMS but has been added to the user."
@@ -765,7 +762,7 @@ class persons extends handler {
             }
 
             //Set the supervisor id as user's own id if webservice contains no id
-            else if ($usersupervisor->data != $person->trainingsupervisorid && empty($person->trainingsupervisorid)) {
+            else if (empty($person->trainingsupervisorid)) {
 
                 $usersupervisor->data = $moodleuser->idnumber;
                 $DB->update_record('user_info_data', $usersupervisor);
@@ -790,10 +787,9 @@ class persons extends handler {
                 $DB->insert_record('user_info_data', $supervisormappings);
 
                 //Get supervisor's name and output
-                $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                 $message = $this->get_string(
                     "details",
-                    "{$supervisor->firstname} {$supervisor->lastname} assigned as a supervisor to this user"
+                    "User with the ID {$person->trainingsupervisorid} assigned to this learner"
                 );
 
                 mtrace($message);
@@ -806,10 +802,9 @@ class persons extends handler {
                 $DB->insert_record('user_info_data', $supervisormappings);
 
                 //Get supervisor's name and output
-                $supervisor = $DB->get_record('user', ['idnumber' => $person->trainingsupervisorid]);
                 $message = $this->get_string(
                     "details",
-                    "{$supervisor->firstname} {$supervisor->lastname} is a supervisor and has assigned their ID to themselves"
+                    "User's supervisor id assigned to self"
                 );
 
                 mtrace($message);
