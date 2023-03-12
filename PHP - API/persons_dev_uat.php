@@ -170,8 +170,7 @@ class persons extends handler {
                 // Prepare a message for the log.
                 $message = $this->get_string(
                     'process',
-                    "Updating user with the id {$person->id}, username {$person->username} and email {$person->email}.".
-                    "Updating their details."
+                    "Updating user with the id {$person->id}, username {$person->username} and email {$person->email}."
                 );
 
                 $existinguser = true;
@@ -188,7 +187,7 @@ class persons extends handler {
 
                 // Prepare a message for the log.
                 $message = $this->get_string(
-                    'process', "Updating user with the id, {$person->username} and email {$person->email}. Updating their details."
+                    'process', "Updating user with the id, {$person->username} and email {$person->email}."
                 );
 
                 $existinguser = true;
@@ -198,7 +197,7 @@ class persons extends handler {
 
                 // Actual perform the update.
                 $this->update_person($person, $conditionsusernameandemail);
-                $this->update_profile_fields($person, $conditionsidnumberusernameandemail);
+                $this->update_profile_fields($person, $conditionsusernameandemail);
 
             } else if ($userexistsbyidnumber) {
                 // If the user exists just by idnumber then they could be missing some stuff but I highly doubt it.
