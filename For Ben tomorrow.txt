@@ -1,3 +1,8 @@
-Can we remove the OIDC field? Is it required for the sso authentication?
-
 Test the sync again, I think the Secondary Identifier field is not being removed for the learner&supervisor user
+
+Can we remove the OIDC field? Is it required for the sso authentication?
+Regardless of CRM field changes, test the dev removeopenid.php by adding a new user and running it
+
+Check what the totaraassessorgroup returns for empty ( --- ) values in CRM.
+If it is empty, make it set the user to not assigned (create a record - future enhancements)
+If it has a value, change it to not assigned.
