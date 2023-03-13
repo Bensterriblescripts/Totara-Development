@@ -1,4 +1,13 @@
 <?php
+
+
+//ENDPOINT CHANGES
+//REMOVE UNNECESSARY JSON OBJECT - trainingsupervisorid
+//sorry Josh...
+
+
+
+
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -16,11 +25,6 @@
 
 namespace local_mitowebservices\handlers;
 
-/*
-use auth_oauth2\linked_login;
-use auth_oauth2\api;
-use core\oauth2\issuer;
-*/
 use core_text;
 use stdClass;
 use core_user;
@@ -65,7 +69,7 @@ class persons extends handler {
 
         // What fields are required in the ITOMIC webservice response object?
         $requiredfields = array(
-            'id', 'username', 'firstname', 'lastname', 'email', 'mobile', 'landline', 'organisation', 'modified', 'trainingsupervisorid', 'totaraassessorgroup'
+            'id', 'username', 'firstname', 'lastname', 'email', 'mobile', 'landline', 'organisation', 'modified', 'totaraassessorgroup', 'trainingsupervisorid', 'agents'
         );
         
         // Construct this object.
@@ -178,9 +182,13 @@ class persons extends handler {
                 // Output the message to the log.
                 mtrace($message);
 
+                //Get the user's moodle record
+                $moodleuser = $DB->get_record('user', ['idnumber' => $person->id, 'username'=> $person->username, 'email' => $person->email]);
+
                 // Actual perform the update.
-                $this->update_person($person, $conditionsidnumber);
-                $this->update_profile_fields($person, $conditionsidnumber);
+                $this->update_person($person, $conditionsidnumber, $moodleuser);
+                $this->update_profile_fields($person, $moodleuser);
+                $this->update_agents($person, $moodleuser);
 
             } else if ($userexistsbyusernameandemail) {
                 // If the user exists by username and email then we need to update them. They should have an idnumber.
@@ -195,9 +203,13 @@ class persons extends handler {
                 // Output the message to the log.
                 mtrace($message);
 
+                //Get the moodle record
+                $moodleuser = $DB->get_record('user', ['username' => $person->username, 'email' => $person->email]);
+
                 // Actual perform the update.
-                $this->update_person($person, $conditionsusernameandemail);
-                $this->update_profile_fields($person, $conditionsusernameandemail);
+                $this->update_person($person, $conditionsusernameandemail, $moodleuser);
+                $this->update_profile_fields($person, $moodleuser);
+                $this->update_agents($person, $moodleuser);
 
             } else if ($userexistsbyidnumber) {
                 // If the user exists just by idnumber then they could be missing some stuff but I highly doubt it.
@@ -205,14 +217,18 @@ class persons extends handler {
                 // Prepare a message for the log
                 $message = $this->get_string('process', "Updating user with the idnumber {$person->id}");
 
+                $existinguser = true;
+
                 // Output the message to the log.
                 mtrace($message);
 
-                $existinguser = true;
+                //Get the moodle record
+                $moodleuser = $DB->get_record('user', ['idnumber' => $person->id]);
 
                 // Actual perform the update.
-                $this->update_person($person, $conditionsidnumber);
-                $this->update_profile_fields($person, $conditionsidnumber);
+                $this->update_person($person, $conditionsidnumber, $moodleuser);
+                $this->update_profile_fields($person, $moodleuser);
+                $this->update_agents($person, $moodleuser);
 
             } else {
                 // The user doesn't exist. Still look for users that exist with the same email.
@@ -416,7 +432,7 @@ class persons extends handler {
      * @return  bool                True if the person was updated or false if no changes. This shouldn't really return false unless
      *                              the caller is false :joy:.
      */
-    private function update_person(stdClass $person, $conditions = array()) {
+    private function update_person(stdClass $person, $conditions, $moodleuser = array()) {
 
         global $DB;
 
@@ -431,9 +447,6 @@ class persons extends handler {
         if (!isset($conditions['deleted'])) {
             $conditions['deleted'] = 0;
         }
-
-        // Find the moodle user for this person.
-        $moodleuser = $DB->get_record('user', $conditions);
 
         // Find the authentication for this person.
         $conditions['auth'] = $person->auth;
@@ -580,37 +593,9 @@ class persons extends handler {
     *                              
     */
 
-    private function update_profile_fields(stdClass $person, $conditions = array()) {
+    private function update_profile_fields(stdClass $person, $moodleuser = array()) {
 
         global $DB;
-
-        // Check the conditions array. This should have something i.e. key = field and value = the value to find.
-        if (empty($conditions)) {
-
-            // Lets notifiy the output that there was an issue. This shouldn't ever happen.
-            mtrace($this->get_string('update_person', "Conditions can not be empty.", 'exception'));
-            return false;
-
-        }
-
-        // Ensure that we are filtering for only users that are not deleted.
-        if (!isset($conditions['deleted'])) {
-            $conditions['deleted'] = 0;
-        }
-
-        // Find the moodle user for this person.
-        $moodleuser = $DB->get_record('user', $conditions);
-        
-        if (!$moodleuser) {
-            // The person we are trying to update doesn't exist in moodle. This should never happen but we will catch it anyway.
-            $errormessage = $this->get_string(
-                'update_person', "The person with id {$person->id} you are trying to update doesn't exist in moodle."
-            );
-
-            // Output the error message.
-            mtrace($errormessage);
-            return false;
-        }
 
         //Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
@@ -618,16 +603,15 @@ class persons extends handler {
         //Does the user have existing records?
         $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
         $assessorgroupfieldexists = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
-        $supervisorfieldexists = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
         
-        //Create the default MITO ID field mappings
+        //Default MITO ID field mappings
         $mitoidmappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '10',
             'data'          => 'Pending Sync',
             'dataformat'    => '0'
         );
-        //Create the default assessor group field mappings
+        //Default assessor group field mappings
         $assessorgroupmappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '6',
@@ -635,18 +619,10 @@ class persons extends handler {
             'dataformat'    => '0'
 
         );
-        //Create the default supervisor field mappings
-        $supervisormappings = array(
-            'userid'        => $moodleuser->id,
-            'fieldid'       => '9',
-            'data'          => 'Not assigned',
-            'dataformat'    => '0'
-        );
-
-        //TODO: Enclose all mitoid field code in if statement for invalid/non-existant JSON values. Prevents potential DB corruption and can be used to notify elearning@mito.org.nz of sync errors.
 
         //If there is, determine whether it needs changing
         if ($mitoidfieldexists) {
+
             $mitoidfield = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '10']);
 
             //If it doesn't match, update the record
@@ -680,11 +656,8 @@ class persons extends handler {
                 mtrace($message);
             }
         }
-    }
 
         //Assessor Group - Update
-
-        //Check for an existing record, we don't want to create one for no reason
         if ($assessorgroupfieldexists) {
 
             $userassessorgroup = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
@@ -731,91 +704,320 @@ class persons extends handler {
                 );
                 mtrace($message);
             }
-        }        
-
-        //Supervisor - Update
-        if ($supervisorfieldexists) {
-            $usersupervisor = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
-
-            //Update the field if the webservice contains a value and the id does not match the one in the user's field
-            if (($usersupervisor->data != $person->trainingsupervisorid) && (!empty($person->trainingsupervisorid))) {
-
-                $usersupervisor->data = $person->trainingsupervisorid;
-                $DB->update_record('user_info_data', $usersupervisor);
-
-                //Let someone know if supervisor doesn't exist in the LMS
-                if ($DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
-                    
-                    $message = $this->get_string(
-                    "details",
-                    "Supervisor changed to the user with the id: {$person->trainingsupervisorid}"
-                    );
-    
-                    mtrace($message);
-                }
-                else if (!$DB->record_exists('user', ['idnumber' => $person->trainingsupervisorid])) {
-                    $message = $this->get_string(
-                        "details",
-                        "Supervisor with the id {$person->trainingsupervisorid} doesn't exist in the LMS but has been added to the user."
-                    );
-    
-                    mtrace($message);
-                }
-            }
-
-            //Set the supervisor id as user's own id if webservice contains no id
-            else if (empty($person->trainingsupervisorid)) {
-
-                $usersupervisor->data = $moodleuser->idnumber;
-                $DB->update_record('user_info_data', $usersupervisor);
-
-                $message = $this->get_string(
-                    "details",
-                    "No supervisor value on endpoint, used own ID instead."
-                );
-
-                mtrace($message);
-            }
-
-        }
-
-        //Supervisor - Create
-        else if (!$supervisorfieldexists) {
-
-            //If the endpoint value isn't empty make the new record
-            if (!empty($person->trainingsupervisorid)) {
-
-                $supervisormappings->data = $person->trainingsupervisorid;
-                $DB->insert_record('user_info_data', $supervisormappings);
-
-                //Get supervisor's name and output
-                $message = $this->get_string(
-                    "details",
-                    "User with the ID {$person->trainingsupervisorid} assigned to this learner"
-                );
-
-                mtrace($message);
-            }
-            //Otherwise, set the supervisor id as user's own id
-            else if (empty($person->trainingsupervisorid)) {
-
-                $supervisormappings->data = $moodleuser->idnumber;
-
-                $DB->insert_record('user_info_data', $supervisormappings);
-
-                //Get supervisor's name and output
-                $message = $this->get_string(
-                    "details",
-                    "User's supervisor id assigned to self"
-                );
-
-                mtrace($message);
-            }
         }
 
         //Let our function know we're done.
         return true;
     }
+
+    /**
+    *   Learner/Supervisor fields sync for auto-grouping the two
+    *   Field 9     - Identifier
+    *   Field 11    - Secondary Identifier
+    *
+    *
+    * @param   stdClass $person   
+    * @throws  \exception          
+    * @return  bool                
+    *                              
+    */
+
+    private function update_agents(stdClass $person, $moodleuser = array()) {
+
+        global $DB;
+
+        if (!$moodleuser) {
+            // The person we are trying to update doesn't exist in moodle. This should never happen but we will catch it anyway.
+            $errormessage = $this->get_string(
+                'update_person', "The person with id {$person->id} you are trying to update doesn't exist in moodle."
+            );
+
+            // Output the error message.
+            mtrace($errormessage);
+            return false;
+        }
+
+        // Booleans to avoid creating more queries than necessary
+        $supervisorexists           = false;
+
+        $supervisorfield9exists     = false;
+        $supervisorfield11exists    = false;
+
+        $supervisorcheck            = false;
+
+        $agent0                     = false;
+        $agent1                     = false;
+
+        // Find the state and correct type of agent for this user
+        if (!empty($person->agents[0])) {
+            if ($person->agents[0]->type == 'Supervisor') {
+                $agent0 = true;
+            }
+        }
+        else if (!empty($person->agents[1])) {
+            if ($person->agents[1]->type == 'Supervisor') {
+                $agent1 = true;
+            }
+        }
+        
+        // Determine whether the user has a supervisor via the agents and get the supervisor's user and user_info_data records.
+        // Grab the user's supervisor from the agents object
+        if ($agent0) {
+            // Make sure the supervisor exists in the LMS
+            if ( $DB->record_exists('user', ['email' => $person->agents[0]->email, 'idnumber' => $person->agents[0]->id]) ) {
+                // Store the supervisor's user record
+                $moodlesupervisor = $DB->get_record('user', ['email' => $person->agents[0]->email, 'idnumber' => $person->agents[0]->id]);
+                // Make sure we tell the other 'if' statements to continue
+                $supervisorexists = true;
+            }
+            // End if the supervisor doesn't exist in the LMS. We're not setting up their moodle account here.
+            else {
+                $message = $this->get_string(
+                    "details",
+                    "this user's supervisor does not yet exist in the LMS"
+                );
+                mtrace($message);
+            }
+        }
+        //NOT INTENDED FOR USE. Leaving here in case the supervisor appears in the second agents array.
+        if ($agent1) {
+            if ( $DB->record_exists('user', ['email' => $person->agents[1]->email, 'idnumber' => $person->agents[1]->id]) ) {
+                // Store the supervisor's user record
+                $moodlesupervisor = $DB->get_record('user', ['email' => $person->agents[1]->email, 'idnumber' => $person->agents[1]->id]);
+                // Make sure we tell the other 'if' statements to continue
+                $supervisorexists = true;
+            }
+            // End if the supervisor doesn't exist in the LMS. We're not setting up their moodle account here.
+            else {
+                $message = $this->get_string(
+                    "details",
+                    "this user's supervisor does not yet exist in the LMS"
+                    );
+                    mtrace($message);
+                }
+        }
+
+        // Generate some default/empty field records for the user and supervisor (if they exist)
+        //User - Field 9 - Identifier
+        $usernewfield9 = array (
+            'userid'        => $moodleuser->id,
+            'fieldid'       => '9',
+            'data'          => 'Not assigned',
+            'dataformat'    => '0'
+        );
+
+        //User - Field 11 - Secondary Identifier
+        $usernewfield11 = array (
+            'userid'        => $moodleuser->id,
+            'fieldid'       => '11',
+            'data'          => 'Not assigned',
+            'dataformat'    => '0'
+        );
+        if ($supervisorexists) {
+            //Supervisor - Field 9 - Identifier
+            $supervisornewfield9 = array (
+                'userid'        => $moodlesupervisor->id,
+                'fieldid'       => '9',
+                'data'          => 'Not assigned',
+                'dataformat'    => '0'
+            );
+            //Supervisor - Field 11 - Secondary Identifier
+            $supervisornewfield11 = array (
+                'userid'        => $moodlesupervisor->id,
+                'fieldid'       => '11',
+                'data'          => 'Not assigned',
+                'dataformat'    => '0'
+            );
+        }
+
+        // Get the user's fields and if they exist
+        $userfield9exists               = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+        if ($userfield9exists) {
+            $userfield9                 = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '9']);
+        }
+        $userfield11exists              = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '11']);
+        if ($userfield11exists) {
+            $userfield11                = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '11']);
+        }
+        
+        // Get the supervisor's fields and if they exist
+        if ($supervisorexists) {
+            $supervisorfield9exists     = $DB->record_exists('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '9']);
+            if ($supervisorfield9exists) {
+                $supervisorfield9       = $DB->get_record('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '9']);
+            }
+            $supervisorfield11exists    = $DB->record_exists('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '11']);
+            if ($supervisorfield11exists) {
+                $supervisorfield11      = $DB->get_record('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '11']);
+            }
+        }
+
+        // Do we need to use set up the secondary identifier connection for this user and agent
+        if ($supervisorexists && $supervisorfield9exists && $supervisorfield9->data != $person->trainingsupervisorid && $supervisorfield9->data != 'Not assigned') {
+            $supervisorcheck = true;
+        }
+
+        //
+        // Supervisor - Set self
+        //
+        if (!$supervisorexists) {
+            if ($userfield9exists && $userfield9->data != $person->id) {
+                // Set field 9 to own CRM ID
+                $userfield9->data = $person->id;
+                $DB->update_record('user_info_data', $userfield9);
+                // Clean up any previous field 11 records, this user has no supervisor
+                if ($userfield11exists && $userfield11->data != 'Not assigned') {
+                    $userfield11->data = 'Not assigned';
+                }
+                
+                $message = $this->get_string(
+                    "details",
+                    "User's profile fields have been set as a supervisor"
+                    );
+                    mtrace($message);
+                
+            }
+            else if (!$userfield9exists) {
+                // Create field 9 and set it to own CRM ID
+                $usernewfield9->data = $person->id;
+                $DB->insert_record('user_info_data', $usernewfield9);
+                // We assume we don't need to do any field 11 cleaning here. In the rare case we do, it will be caught in the next sync anyway.
+
+                $message = $this->get_string(
+                    "details",
+                    "User's profile fields have been set up as a supervisor"
+                    );
+                    mtrace($message);
+            }
+        }
+
+        //
+        // Learner, no supervisor field conflict - Set self
+        //
+        if ($supervisorexists && $supervisorcheck == false) {
+            if ($userfield9exists && $userfield9->data != $person->trainingsupervisorid) {
+                // Set field 9 to supervisor's CRM ID
+                $userfield9->data = $person->trainingsupervisorid;
+                $DB->update_record('user_info_data', $userfield9);
+                // Clean up any previous field 11 records, we know this user's supervisor is not a learner
+                if ($userfield11exists && $userfield11->data != 'Not assigned') {
+                    $userfield11->data = 'Not assigned';
+                    $DB->update_record('user_info_data', $userfield11);
+                }
+
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has changed to: {$person->trainingsupervisorid}"
+                    );
+                    mtrace($message);
+            }
+            else if (!$userfield9exists) {
+                // Create field 9 and set it to the supervisor's CRM ID
+                $usernewfield9->data = $person->trainingsupervisorid;
+                $DB->insert_record('user_info_data', $usernewfield9);
+                // We assume we don't need to do any field 11 cleaning here. In the rare case we do, it will be caught in the next sync anyway.
+
+                $message = $this->get_string(
+                    "details",
+                    "This user has been linked to the supervisor: {$person->trainingsupervisorid}"
+                    );
+                    mtrace($message);
+            }
+        }
+        
+        //
+        // Learner has a supervisor with a field conflict - Set self and supervisor
+        //
+        if ($supervisorexists && $supervisorcheck == true) {
+
+            //
+            // Set up this user (as a learner)
+            //
+            if ($userfield11exists && $userfield11->data != $person->trainingsupervisorid) {
+                // Set user's field 11 to the supervisor's id
+                $userfield11->data = $person->trainingsupervisorid;
+                $DB->update_record('user_info_data', $userfield11);
+
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has changed to: {$person->trainingsupervisorid}, the secondary identifier was used"
+                    );
+                    mtrace($message);
+            }
+            else if (!$userfield11exists) {
+                $usernewfield11->data = $person->trainingsupervisorid;
+                $DB->insert_record('user_info_data', $usernewfield11);
+                
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has been set to: {$person->trainingsupervisorid}, the secondary identifier was used"
+                    );
+                    mtrace($message);
+            }
+            // Clean up prior sync related errors
+            if ($userfield9exists && $userfield9->data == $userfield11->data) {
+                $userfield9->data = 'Not assigned';
+                $DB->update_record('user_info_data', $userfield9);
+            }
+
+            //
+            // Set up the supervisor with this user as a learner
+            //
+            if ($supervisorfield11exists && $supervisorfield11 != $person->trainingsupervisorid) {
+                // Set the supervisor's field 11 to this user's supervisor CRM ID 
+                $supervisorfield11->data = $person->trainingsupervisorid;
+                $DB->update_record('user_info_data', $supervisorfield11);
+
+                $message = $this->get_string(
+                    "details",
+                    "Changed the supervisor's secondary identifier to match this user."
+                    );
+                    mtrace($message);
+            }
+            else if (!$supervisorfield11exists) {
+                // Create the supervisor's field 11 and set it to the user's supervisor CRM ID
+                $supervisornewfield11->data = $person->trainingsupervisorid;
+                $DB->insert_record('user_info_data', $supervisornewfield11);
+
+                
+                $message = $this->get_string(
+                    "details",
+                    "Set up the supervisor's secondary identifier to match this user."
+                    );
+                    mtrace($message);
+            }
+        }
+
+
+
+
+        // Role update
+
+        // //Give the supervisor the verifier role if they don't have it already
+        // $supervisorrole = $DB->record_exists('role_assignments', ['roleid' => '46','userid' => $supervisoruser->id]);
+        // if (!$supervisorrole) {
+        //     $verifierrole = array (
+        //             'roleid'        => '46',
+        //             'contextid'     => '1',
+        //             'userid'        => $supervisoruser->id,
+        //             'timemodified'  => time(),
+        //             'modifierid'    => '25089',
+        //             'itemid'        => '0',
+        //             'sortorder'     => '0'
+        //         );
+        //         $DB->insert_record('role_assignments', $verifierrole);
+        //         $message = $this->get_string(
+        //             "details",
+        //             "Gave the verifier role to this user's supervisor"
+        //         );
+        //         mtrace($message);                  
+        //     }
+        // }
+        
+        //Done
+        return true;
+    }
+
 
     /**
      * Converts the ITOMIC webservice person object into a moodle user as a stdClass object.
