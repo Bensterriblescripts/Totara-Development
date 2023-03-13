@@ -354,9 +354,7 @@ class persons extends handler {
     }
 
     /**
-     * This is the second part of the ITOMIC to moodle user creation process. This is where we actually create the user and
-     * do all of its user creation stuff and openid auth plugin things specifically associating this user to its openid url
-     * as per the configuration specified in this plugins setting.
+     * This is the second part of the ITOMIC to moodle user creation process. This is where we actually create the user.
      *
      * All error checking should have been done before calling this function.
      *
@@ -368,16 +366,11 @@ class persons extends handler {
     private function add_person(stdClass $itomicperson, stdClass $person) {
         global $DB;
 
-        // Get the field to append the users openid url to. Don't worry, this configuration is validated in the parent::process()
-        // so please ensure that the parent::process() has been called first.
-        $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
-
-        $authmethod = 'manual';
-
         // Create a password for the new user.
         if (isset($person->auth)) {
             $authmethod = $person->auth;
         }
+
 		$authmethod = 'oidc';
 		
         $password = hash_internal_user_password($authmethod);
@@ -387,11 +380,6 @@ class persons extends handler {
 
         // Assign the person object the id of the newly created moodle user.
         $itomicperson->id = $moodleuser->id;
-
-        if ($authmethod === 'openid' && function_exists('openid_append_url')) {
-            // Add this user record to the openid_urls table using the openidperson object.
-            openid_append_url($itomicperson, $this->openidurl.$person->$openidurluserfield);
-        }
 
         $DB->update_record('user', $itomicperson);
         $itomicperson = get_complete_user_data('id', $itomicperson->id);
@@ -533,32 +521,6 @@ class persons extends handler {
 
         // Use the user lib to update our user.
         user_update_user($moodleuser, false);
-
-        if (core_text::strtolower($person->auth) === 'openid') {
-            // When the username has changed we need to update the openid_urls table. Unfortunately there isn't a function for this
-            // (I may not have looked properly or at all :joy:) so lets just be cool and do it manually :).
-            if ($usernamehaschanged) {
-                // Get the existing data. Update the openid_url only if the record for that user exists. It should though.
-                if ($openidurl = $DB->get_record('openid_urls', array('userid' => $moodleuser->id))) {
-                    // Get the openid_url_userfield. This will be used to construct the updated openid_url for this user.
-                    $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
-
-                    // Change the existing records url value to reflect the username change.
-                    $openidurl->url = $this->openidurl . $moodleuser->$openidurluserfield;
-
-                    // Update the openid_urls table with the updated openid_url.
-                    $DB->update_record('openid_urls', $openidurl);
-
-                    // Output a message to notify of openid_url change.
-                    // Todo: This would be really cool if it was an event trigger? Or not. But for now I am not that cool :(.
-                    $outputmessage = $this->get_string(
-                        'update_person', "Updated openid_url for ITOMIC user with id {$person->id} because of username change"
-                    );
-
-                    mtrace($outputmessage);
-                }
-            }
-        }
 
         // Update local mapping.
         $this->map_object('user', $moodleuser->id, $person->id, false, true);
