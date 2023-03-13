@@ -742,6 +742,7 @@ class persons extends handler {
 
         $supervisorfield9exists     = false;
         $supervisorfield11exists    = false;
+        $supervisorroleexists       = false;
 
         $supervisorcheck            = false;
 
@@ -850,6 +851,9 @@ class persons extends handler {
             if ($supervisorfield11exists) {
                 $supervisorfield11      = $DB->get_record('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '11']);
             }
+
+            // Also check if we need to set up their role
+            $supervisorroleexists = $DB->record_exists('role_assignments', ['userid' => $moodlesupervisor->id, 'roleid' => '46', 'contextid' => '1']);
         }
 
         // Do we need to use set up the secondary identifier connection for this user and agent
@@ -978,7 +982,6 @@ class persons extends handler {
                 // Create the supervisor's field 11 and set it to the user's supervisor CRM ID
                 $supervisornewfield11->data = $person->trainingsupervisorid;
                 $DB->insert_record('user_info_data', $supervisornewfield11);
-
                 
                 $message = $this->get_string(
                     "details",
@@ -988,31 +991,25 @@ class persons extends handler {
             }
         }
 
-
-
-
         // Role update
-
-        // //Give the supervisor the verifier role if they don't have it already
-        // $supervisorrole = $DB->record_exists('role_assignments', ['roleid' => '46','userid' => $supervisoruser->id]);
-        // if (!$supervisorrole) {
-        //     $verifierrole = array (
-        //             'roleid'        => '46',
-        //             'contextid'     => '1',
-        //             'userid'        => $supervisoruser->id,
-        //             'timemodified'  => time(),
-        //             'modifierid'    => '25089',
-        //             'itemid'        => '0',
-        //             'sortorder'     => '0'
-        //         );
-        //         $DB->insert_record('role_assignments', $verifierrole);
-        //         $message = $this->get_string(
-        //             "details",
-        //             "Gave the verifier role to this user's supervisor"
-        //         );
-        //         mtrace($message);                  
-        //     }
-        // }
+        // Give the supervisor the verifier role if they don't have it already
+        if (!$supervisorroleexists) {
+            $verifierrole = array (
+                    'roleid'        => '46',
+                    'contextid'     => '1',
+                    'userid'        => $moodlesupervisor->id,
+                    'timemodified'  => time(),
+                    'modifierid'    => '25089', // Ben - Default admin
+                    'itemid'        => '0',
+                    'sortorder'     => '0'
+                );
+                $DB->insert_record('role_assignments', $verifierrole);
+                $message = $this->get_string(
+                    "details",
+                    "Gave the verifier role to this user's supervisor"
+                );
+                mtrace($message);                  
+            }
         
         //Done
         return true;
