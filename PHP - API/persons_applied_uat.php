@@ -597,35 +597,42 @@ class persons extends handler {
 
         global $DB;
 
-        //Manipulate username into MITO ID - TODO Needs to be an endpoint object
+        // Manipulate username into MITO ID - TODO Needs to be an endpoint object
         $mitoid = substr($person->username, 0, strpos($person->username, '@'));
+        //Set a new value for assessorgroup, if it's empty set it to default
+        if (empty($person->totaraassessorgroup)) {
+            $person->totaraassessorgroup = 'Not assigned';
+        }
 
-        //Does the user have existing records?
+        // Does the user have existing records?
         $mitoidfieldexists = $DB->record_exists('user_info_data',['userid' => $moodleuser->id, 'fieldid' => '10']);
         $assessorgroupfieldexists = $DB->record_exists('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+        if ($assessorgroupfieldexists) {
+            $currentrecord = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' =>'6']);
+        }
         
-        //Default MITO ID field mappings
+        // Default MITO ID field mappings
         $mitoidmappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '10',
             'data'          => 'Pending Sync',
             'dataformat'    => '0'
         );
-        //Default assessor group field mappings
+        // Default assessor group field mappings
         $assessorgroupmappings = array(
             'userid'        => $moodleuser->id,
             'fieldid'       => '6',
-            'data'          => 'Not assigned',
+            'data'          => $person->totaraassessorgroup,
             'dataformat'    => '0'
 
         );
 
-        //If there is, determine whether it needs changing
+        // If there is, determine whether it needs changing
         if ($mitoidfieldexists) {
 
             $mitoidfield = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '10']);
 
-            //If it doesn't match, update the record
+            // If it doesn't match, update the record
             if ($mitoidfield->data != $mitoid) {
                 $mitoidfield->data = $mitoid;
                 $DB->update_record('user_info_data', $mitoidfield);
@@ -638,8 +645,7 @@ class persons extends handler {
                 mtrace($message);
             }
         }
-
-        //If it doesn't exist, create it
+        // If it doesn't exist, create it
         else if (!$mitoidfieldexists) {
 
             //If the endpoint value isn't empty make the new record
@@ -657,56 +663,34 @@ class persons extends handler {
             }
         }
 
-        //Assessor Group - Update
-        if ($assessorgroupfieldexists) {
+        // Assessor Group - Update
+        if ($assessorgroupfieldexists && $currentrecord->data != $person->totaraassessorgroup) {
+            // Update the record with the new value
+            $currentrecord->data = $person->totaraassessorgroup;
+            $DB->update_record('user_info_data', $currentrecord);
 
-            $userassessorgroup = $DB->get_record('user_info_data', ['userid' => $moodleuser->id, 'fieldid' => '6']);
+            $message = $this->get_string(
+                "details",
+                "Assessor group set to: {$person->totaraassessorgroup}"
+            );
 
-            // Has the field changed? If so, update.
-            if ($userassessorgroup->data != $person->totaraassessorgroup) {
+            mtrace($message);
 
-                if (!empty($person->totaraassessorgroup)) {
-
-                    $userassessorgroup->data = $person->totaraassessorgroup;
-                    $DB->update_record('user_info_data', $userassessorgroup);
-
-                    $message = $this->get_string(
-                        "details",
-                        "Assessor group changed to: {$person->totaraassessorgroup}"
-                    );
-                    mtrace($message);
-                }
-
-                //Avoid mapping NULL or empty strings - Only for if the field already exists
-                else if (empty($person->totaraassessorgroup)) {
-
-                    $userassessorgroup->data = 'Not assigned';
-
-                    $message = $this->get_string(
-                        "details",
-                        "The previous assessor group has been removed from this user and has now been set to: Not Assigned"
-                    );
-                    mtrace($message);
-                }
-            }
         }
-        //Assessor Group - Create
         else if (!$assessorgroupfieldexists) {
+            // Create the field if it doesn't exist, regardless of value.
+            $DB->insert_record('user_info_data', $assessorgroupmappings);
 
-            //If the endpoint value isn't empty. If the record doesn't exist the LMS will generate a default 'not assigned' value without adding another row to the table.
-            if (!empty($person->totaraassessorgroup)) {
-                $assessorgroupmappings->data = $person->totaraassessorgroup;
-                $DB->insert_record('user_info_data', $assessorgroupmappings);
+            $message = $this->get_string(
+                "details",
+                "Assessor group created and set to: {$person->totaraassessorgroup}"
+            );
 
-                $message = $this->get_string(
-                    "details",
-                    "Assessor group created and set to: {$person->totaraassessorgroup}"
-                );
-                mtrace($message);
-            }
+            mtrace($message);
+
         }
 
-        //Let our function know we're done.
+        // Let our function know we're done.
         return true;
     }
 
@@ -742,6 +726,7 @@ class persons extends handler {
 
         $supervisorfield9exists     = false;
         $supervisorfield11exists    = false;
+        $supervisorroleexists       = false;
 
         $supervisorcheck            = false;
 
@@ -779,7 +764,7 @@ class persons extends handler {
                 mtrace($message);
             }
         }
-        //NOT CURRENTLY IN USE. Leaving here in case the supervisor appears sometimes in the second agents array.
+        //NOT INTENDED FOR USE. Leaving here in case the supervisor appears in the second agents array.
         if ($agent1) {
             if ( $DB->record_exists('user', ['email' => $person->agents[1]->email, 'idnumber' => $person->agents[1]->id]) ) {
                 // Store the supervisor's user record
@@ -850,6 +835,9 @@ class persons extends handler {
             if ($supervisorfield11exists) {
                 $supervisorfield11      = $DB->get_record('user_info_data', ['userid' => $moodlesupervisor->id, 'fieldid' => '11']);
             }
+
+            // Also check if we need to set up their role
+            $supervisorroleexists = $DB->record_exists('role_assignments', ['userid' => $moodlesupervisor->id, 'roleid' => '46', 'contextid' => '1']);
         }
 
         // Do we need to use set up the secondary identifier connection for this user and agent
@@ -869,13 +857,28 @@ class persons extends handler {
                 if ($userfield11exists && $userfield11->data != 'Not assigned') {
                     $userfield11->data = 'Not assigned';
                 }
+                
+                $message = $this->get_string(
+                    "details",
+                    "User's profile fields have been set as a supervisor"
+                    );
+                    mtrace($message);
+                
             }
             else if (!$userfield9exists) {
                 // Create field 9 and set it to own CRM ID
                 $usernewfield9->data = $person->id;
                 $DB->insert_record('user_info_data', $usernewfield9);
                 // We assume we don't need to do any field 11 cleaning here. In the rare case we do, it will be caught in the next sync anyway.
+
+                $message = $this->get_string(
+                    "details",
+                    "User's profile fields have been set up as a supervisor"
+                    );
+                    mtrace($message);
             }
+            // Check if we require this user's role to be updated
+            $supervisorroleexists = $DB->record_exists('role_assignments', ['userid' => $moodleuser->id, 'roleid' => '46', 'contextid' => '1']);
         }
 
         //
@@ -891,12 +894,24 @@ class persons extends handler {
                     $userfield11->data = 'Not assigned';
                     $DB->update_record('user_info_data', $userfield11);
                 }
+
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has changed to: {$person->trainingsupervisorid}"
+                    );
+                    mtrace($message);
             }
             else if (!$userfield9exists) {
                 // Create field 9 and set it to the supervisor's CRM ID
                 $usernewfield9->data = $person->trainingsupervisorid;
                 $DB->insert_record('user_info_data', $usernewfield9);
                 // We assume we don't need to do any field 11 cleaning here. In the rare case we do, it will be caught in the next sync anyway.
+
+                $message = $this->get_string(
+                    "details",
+                    "This user has been linked to the supervisor: {$person->trainingsupervisorid}"
+                    );
+                    mtrace($message);
             }
         }
         
@@ -912,10 +927,22 @@ class persons extends handler {
                 // Set user's field 11 to the supervisor's id
                 $userfield11->data = $person->trainingsupervisorid;
                 $DB->update_record('user_info_data', $userfield11);
+
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has changed to: {$person->trainingsupervisorid}, the secondary identifier was used"
+                    );
+                    mtrace($message);
             }
             else if (!$userfield11exists) {
                 $usernewfield11->data = $person->trainingsupervisorid;
                 $DB->insert_record('user_info_data', $usernewfield11);
+                
+                $message = $this->get_string(
+                    "details",
+                    "This user's supervisor has been set to: {$person->trainingsupervisorid}, the secondary identifier was used"
+                    );
+                    mtrace($message);
             }
             // Clean up prior sync related errors
             if ($userfield9exists && $userfield9->data == $userfield11->data) {
@@ -930,40 +957,64 @@ class persons extends handler {
                 // Set the supervisor's field 11 to this user's supervisor CRM ID 
                 $supervisorfield11->data = $person->trainingsupervisorid;
                 $DB->update_record('user_info_data', $supervisorfield11);
+
+                $message = $this->get_string(
+                    "details",
+                    "Changed the supervisor's secondary identifier to match this user."
+                    );
+                    mtrace($message);
             }
             else if (!$supervisorfield11exists) {
                 // Create the supervisor's field 11 and set it to the user's supervisor CRM ID
                 $supervisornewfield11->data = $person->trainingsupervisorid;
                 $DB->insert_record('user_info_data', $supervisornewfield11);
+                
+                $message = $this->get_string(
+                    "details",
+                    "Set up the supervisor's secondary identifier to match this user."
+                    );
+                    mtrace($message);
             }
         }
 
-
-
-
         // Role update
+        // Give the supervisor the verifier role if they don't have it already
+        if (!$supervisorroleexists && $supervisorexists) {
+            $verifierrole = array (
+                'roleid'        => '46',
+                'contextid'     => '1',
+                'userid'        => $moodlesupervisor->id,
+                'timemodified'  => time(),
+                'modifierid'    => '25089', // Ben - Default admin
+                'itemid'        => '0',
+                'sortorder'     => '0'
+            );
+            $DB->insert_record('role_assignments', $verifierrole);
+            $message = $this->get_string(
+                "details",
+                "Gave the verifier role to this user's supervisor"
+            );
+            mtrace($message);                  
+        }
+        // Give self the role if we don't already
+        else if (!$supervisorroleexists && !$supervisorexists) {
+            $verifierrole = array (
+                'roleid'        => '46',
+                'contextid'     => '1',
+                'userid'        => $moodleuser->id,
+                'timemodified'  => time(),
+                'modifierid'    => '25089', // Ben - Default admin
+                'itemid'        => '0',
+                'sortorder'     => '0'
+            );
+            $DB->insert_record('role_assignments', $verifierrole);
+            $message = $this->get_string(
+                "details",
+                "Gave the verifier role to this user"
+            );
+            mtrace($message);
+        }
 
-        // //Give the supervisor the verifier role if they don't have it already
-        // $supervisorrole = $DB->record_exists('role_assignments', ['roleid' => '46','userid' => $supervisoruser->id]);
-        // if (!$supervisorrole) {
-        //     $verifierrole = array (
-        //             'roleid'        => '46',
-        //             'contextid'     => '1',
-        //             'userid'        => $supervisoruser->id,
-        //             'timemodified'  => time(),
-        //             'modifierid'    => '25089',
-        //             'itemid'        => '0',
-        //             'sortorder'     => '0'
-        //         );
-        //         $DB->insert_record('role_assignments', $verifierrole);
-        //         $message = $this->get_string(
-        //             "details",
-        //             "Gave the verifier role to this user's supervisor"
-        //         );
-        //         mtrace($message);                  
-        //     }
-        // }
-        
         //Done
         return true;
     }
