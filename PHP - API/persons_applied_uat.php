@@ -354,9 +354,7 @@ class persons extends handler {
     }
 
     /**
-     * This is the second part of the ITOMIC to moodle user creation process. This is where we actually create the user and
-     * do all of its user creation stuff and openid auth plugin things specifically associating this user to its openid url
-     * as per the configuration specified in this plugins setting.
+     * This is the second part of the ITOMIC to moodle user creation process. This is where we actually create the user.
      *
      * All error checking should have been done before calling this function.
      *
@@ -368,16 +366,11 @@ class persons extends handler {
     private function add_person(stdClass $itomicperson, stdClass $person) {
         global $DB;
 
-        // Get the field to append the users openid url to. Don't worry, this configuration is validated in the parent::process()
-        // so please ensure that the parent::process() has been called first.
-        $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
-
-        $authmethod = 'manual';
-
         // Create a password for the new user.
         if (isset($person->auth)) {
             $authmethod = $person->auth;
         }
+
 		$authmethod = 'oidc';
 		
         $password = hash_internal_user_password($authmethod);
@@ -387,11 +380,6 @@ class persons extends handler {
 
         // Assign the person object the id of the newly created moodle user.
         $itomicperson->id = $moodleuser->id;
-
-        if ($authmethod === 'openid' && function_exists('openid_append_url')) {
-            // Add this user record to the openid_urls table using the openidperson object.
-            openid_append_url($itomicperson, $this->openidurl.$person->$openidurluserfield);
-        }
 
         $DB->update_record('user', $itomicperson);
         $itomicperson = get_complete_user_data('id', $itomicperson->id);
@@ -415,6 +403,24 @@ class persons extends handler {
             // Trigger a user suspended event.
             user_suspended::create_from_user($itomicperson)->trigger();
         }
+
+        // Create the assesssor group record for this user
+        // Set the value to not assigned if empty
+        if (empty($person->totaraassessorgroup)) {
+            $person->totaraassessorgroup = 'Not assigned';
+        }
+        $assessorgroupmappings = array( 
+            'userid'        => $moodleuser->id,
+            'fieldid'       => '6',
+            'data'          => $person->totaraassessorgroup,
+            'dataformat'    => '0'
+        );
+
+        // Perform the update
+        $DB->insert_record('user_info_data', $assessorgroupmappings);
+
+        //Run the supervisor/learner mapping last
+        $this->update_agents($person, $moodleuser);
 
         // Get out of here :).
         return true;
@@ -533,32 +539,6 @@ class persons extends handler {
 
         // Use the user lib to update our user.
         user_update_user($moodleuser, false);
-
-        if (core_text::strtolower($person->auth) === 'openid') {
-            // When the username has changed we need to update the openid_urls table. Unfortunately there isn't a function for this
-            // (I may not have looked properly or at all :joy:) so lets just be cool and do it manually :).
-            if ($usernamehaschanged) {
-                // Get the existing data. Update the openid_url only if the record for that user exists. It should though.
-                if ($openidurl = $DB->get_record('openid_urls', array('userid' => $moodleuser->id))) {
-                    // Get the openid_url_userfield. This will be used to construct the updated openid_url for this user.
-                    $openidurluserfield = get_config('local_mitowebservices', 'openid_url_userfield');
-
-                    // Change the existing records url value to reflect the username change.
-                    $openidurl->url = $this->openidurl . $moodleuser->$openidurluserfield;
-
-                    // Update the openid_urls table with the updated openid_url.
-                    $DB->update_record('openid_urls', $openidurl);
-
-                    // Output a message to notify of openid_url change.
-                    // Todo: This would be really cool if it was an event trigger? Or not. But for now I am not that cool :(.
-                    $outputmessage = $this->get_string(
-                        'update_person', "Updated openid_url for ITOMIC user with id {$person->id} because of username change"
-                    );
-
-                    mtrace($outputmessage);
-                }
-            }
-        }
 
         // Update local mapping.
         $this->map_object('user', $moodleuser->id, $person->id, false, true);
@@ -799,13 +779,6 @@ class persons extends handler {
             'dataformat'    => '0'
         );
         if ($supervisorexists) {
-            //Supervisor - Field 9 - Identifier
-            $supervisornewfield9 = array (
-                'userid'        => $moodlesupervisor->id,
-                'fieldid'       => '9',
-                'data'          => 'Not assigned',
-                'dataformat'    => '0'
-            );
             //Supervisor - Field 11 - Secondary Identifier
             $supervisornewfield11 = array (
                 'userid'        => $moodlesupervisor->id,
@@ -846,44 +819,9 @@ class persons extends handler {
         }
 
         //
-        // Supervisor - Set self
-        //
-        if (!$supervisorexists) {
-            if ($userfield9exists && $userfield9->data != $person->id) {
-                // Set field 9 to own CRM ID
-                $userfield9->data = $person->id;
-                $DB->update_record('user_info_data', $userfield9);
-                // Clean up any previous field 11 records, this user has no supervisor
-                if ($userfield11exists && $userfield11->data != 'Not assigned') {
-                    $userfield11->data = 'Not assigned';
-                }
-                
-                $message = $this->get_string(
-                    "details",
-                    "User's profile fields have been set as a supervisor"
-                    );
-                    mtrace($message);
-                
-            }
-            else if (!$userfield9exists) {
-                // Create field 9 and set it to own CRM ID
-                $usernewfield9->data = $person->id;
-                $DB->insert_record('user_info_data', $usernewfield9);
-                // We assume we don't need to do any field 11 cleaning here. In the rare case we do, it will be caught in the next sync anyway.
-
-                $message = $this->get_string(
-                    "details",
-                    "User's profile fields have been set up as a supervisor"
-                    );
-                    mtrace($message);
-            }
-            // Check if we require this user's role to be updated
-            $supervisorroleexists = $DB->record_exists('role_assignments', ['userid' => $moodleuser->id, 'roleid' => '46', 'contextid' => '1']);
-        }
-
-        //
         // Learner, no supervisor field conflict - Set self
         //
+
         if ($supervisorexists && $supervisorcheck == false) {
             if ($userfield9exists && $userfield9->data != $person->trainingsupervisorid) {
                 // Set field 9 to supervisor's CRM ID
@@ -914,12 +852,16 @@ class persons extends handler {
                     mtrace($message);
             }
         }
-        
+        // Set up the supervisor too
+        else if (!$supervisorexists && $supervisorcheck == false) {
+
+        }
+
         //
         // Learner has a supervisor with a field conflict - Set self and supervisor
         //
+        
         if ($supervisorexists && $supervisorcheck == true) {
-
             //
             // Set up this user (as a learner)
             //
@@ -995,24 +937,6 @@ class persons extends handler {
                 "Gave the verifier role to this user's supervisor"
             );
             mtrace($message);                  
-        }
-        // Give self the role if we don't already
-        else if (!$supervisorroleexists && !$supervisorexists) {
-            $verifierrole = array (
-                'roleid'        => '46',
-                'contextid'     => '1',
-                'userid'        => $moodleuser->id,
-                'timemodified'  => time(),
-                'modifierid'    => '25089', // Ben - Default admin
-                'itemid'        => '0',
-                'sortorder'     => '0'
-            );
-            $DB->insert_record('role_assignments', $verifierrole);
-            $message = $this->get_string(
-                "details",
-                "Gave the verifier role to this user"
-            );
-            mtrace($message);
         }
 
         //Done
